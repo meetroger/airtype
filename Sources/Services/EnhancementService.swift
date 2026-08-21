@@ -29,11 +29,15 @@ class EnhancementService {
         try Task.checkCancellation()
 
         let baseURL = settings.currentEnhancementBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-        let url = URL(string: "\(baseURL)/chat/completions")!
+        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+            throw EnhancementError.invalidBaseURL
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(settings.currentEnhancementApiKey)", forHTTPHeaderField: "Authorization")
+        if !settings.currentEnhancementApiKey.isEmpty {
+            request.setValue("Bearer \(settings.currentEnhancementApiKey)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 60  // 1 minute timeout
 
@@ -123,31 +127,45 @@ class EnhancementService {
         return result
     }
 
+    /// Fetches model IDs from an OpenAI-compatible `/models` endpoint.
+    func fetchAvailableModels() async throws -> [String] {
+        let baseURL = settings.currentEnhancementBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard let url = URL(string: "\(baseURL)/models") else {
+            throw EnhancementError.invalidBaseURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        if !settings.currentEnhancementApiKey.isEmpty {
+            request.setValue("Bearer \(settings.currentEnhancementApiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            if error.code == .timedOut {
+                throw EnhancementError.networkTimeout
+            }
+            throw EnhancementError.apiError("Could not connect to \(baseURL): \(error.localizedDescription)")
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw EnhancementError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw EnhancementError.httpError(httpResponse.statusCode)
+        }
+
+        let modelList = try JSONDecoder().decode(ModelListResponse.self, from: data)
+        return Array(Set(modelList.data.map(\.id))).sorted()
+    }
+
     private var enhancementPrompt: String {
-        """
-        You are a speech-to-text error corrector. Fix transcription errors while preserving the speaker's original words as much as possible.
-
-        CORRECT these issues:
-        - Misrecognized words due to pronunciation, accent, or background noise
-        - Homophones: choose contextually correct form (your/you're, their/there/they're, its/it's)
-        - Technical terms and proper nouns: use correct casing (react → React, ios → iOS, github → GitHub)
-        - Numbers and dates: convert to numerals (twenty three → 23, december fifth → December 5th)
-        - Missing punctuation and capitalization
-        - Sentence boundaries: split run-on sentences properly
-        - Immediate word stutters: remove duplicates (I I I think → I think, the the → the)
-
-        DO NOT change:
-        - Filler words (um, uh, like, you know) - keep them
-        - Self-corrections (keep "Monday, no wait, Tuesday" exactly as spoken)
-        - User's grammar or dialect (preserve "I seen him" if that's what they said)
-        - Repeated phrases for emphasis (keep "I think, I think we should")
-        - Word choices or sentence structure
-
-        IMPORTANT:
-        - When uncertain if something is an error or intentional, leave it unchanged
-        - Be conservative - only fix clear transcription errors
-        - Return ONLY the corrected text, nothing else
-        """
+        let prompt = settings.enhancementPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
     }
 }
 
@@ -177,9 +195,18 @@ struct Choice: Codable {
     let message: ChatMessage
 }
 
+private struct ModelListResponse: Decodable {
+    let data: [ModelDescriptor]
+}
+
+private struct ModelDescriptor: Decodable {
+    let id: String
+}
+
 // MARK: - Errors
 enum EnhancementError: LocalizedError {
     case noAPIKey
+    case invalidBaseURL
     case invalidResponse
     case httpError(Int)
     case apiError(String)
@@ -190,6 +217,8 @@ enum EnhancementError: LocalizedError {
         switch self {
         case .noAPIKey:
             return "OpenAI API key not configured"
+        case .invalidBaseURL:
+            return "Invalid API endpoint URL"
         case .invalidResponse:
             return "Invalid response from GPT API"
         case .httpError(let code):

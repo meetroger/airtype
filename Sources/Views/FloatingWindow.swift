@@ -1,5 +1,99 @@
 import SwiftUI
 import AppKit
+import ApplicationServices
+
+/// Resolves the display containing the currently focused input control/window.
+/// Accessibility coordinates use Quartz's top-left origin, so compare them
+/// against CGDisplayBounds instead of NSScreen.frame.
+enum FocusedScreenLocator {
+    static func current() -> NSScreen? {
+        if AXIsProcessTrusted(),
+           let focusedPoint = focusedElementCenter(),
+           let screen = screen(containingQuartzPoint: focusedPoint) {
+            return screen
+        }
+
+        // This also gives intuitive behavior for apps whose focused element
+        // does not expose an accessibility frame.
+        let mouseLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+    }
+
+    private static func focusedElementCenter() -> CGPoint? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedValue
+        ) == .success,
+        let focusedValue,
+        CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else {
+            return focusedWindowCenter()
+        }
+
+        let element = unsafeBitCast(focusedValue, to: AXUIElement.self)
+        return center(of: element) ?? focusedWindowCenter()
+    }
+
+    private static func focusedWindowCenter() -> CGPoint? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let application = AXUIElementCreateApplication(app.processIdentifier)
+        var windowValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            application,
+            kAXFocusedWindowAttribute as CFString,
+            &windowValue
+        ) == .success,
+        let windowValue,
+        CFGetTypeID(windowValue) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        return center(of: unsafeBitCast(windowValue, to: AXUIElement.self))
+    }
+
+    private static func center(of element: AXUIElement) -> CGPoint? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXPositionAttribute as CFString,
+            &positionValue
+        ) == .success,
+        AXUIElementCopyAttributeValue(
+            element,
+            kAXSizeAttribute as CFString,
+            &sizeValue
+        ) == .success,
+        let positionValue,
+        let sizeValue,
+        CFGetTypeID(positionValue) == AXValueGetTypeID(),
+        CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let positionAXValue = unsafeBitCast(positionValue, to: AXValue.self)
+        let sizeAXValue = unsafeBitCast(sizeValue, to: AXValue.self)
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionAXValue, .cgPoint, &position),
+              AXValueGetValue(sizeAXValue, .cgSize, &size) else {
+            return nil
+        }
+
+        return CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+    }
+
+    private static func screen(containingQuartzPoint point: CGPoint) -> NSScreen? {
+        NSScreen.screens.first { screen in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return false
+            }
+            return CGDisplayBounds(CGDirectDisplayID(number.uint32Value)).contains(point)
+        }
+    }
+}
 
 /// A floating panel that stays on top of all windows
 /// Styled like Raycast/Spotlight with dark minimal appearance
@@ -59,8 +153,8 @@ class FloatingPanel: NSPanel {
     }
 
     /// Position the panel in a corner of the screen
-    func position(at corner: FloatingWindowPosition) {
-        guard let screenFrame = currentVisibleScreenFrame() else { return }
+    func position(at corner: FloatingWindowPosition, on targetScreen: NSScreen? = nil) {
+        guard let screenFrame = targetScreen?.visibleFrame ?? currentVisibleScreenFrame() else { return }
 
         let padding: CGFloat = 20
 
@@ -75,6 +169,11 @@ class FloatingPanel: NSPanel {
         case .bottomRight:
             origin = NSPoint(
                 x: screenFrame.maxX - frame.width - padding,
+                y: screenFrame.minY + padding
+            )
+        case .bottomCenter:
+            origin = NSPoint(
+                x: screenFrame.midX - frame.width / 2,
                 y: screenFrame.minY + padding
             )
         case .topLeft:
@@ -158,7 +257,7 @@ class FloatingWindowController: ObservableObject {
         }
 
         panel?.orderFront(nil)
-        panel?.position(at: settings.floatingWindowPosition)
+        panel?.position(at: settings.floatingWindowPosition, on: FocusedScreenLocator.current())
         isVisible = true
     }
 

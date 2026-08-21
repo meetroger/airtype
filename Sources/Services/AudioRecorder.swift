@@ -49,14 +49,28 @@ class AudioRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func requestPermission() {
-        AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
-            Task { @MainActor in
-                self?.hasPermission = granted
-                if !granted {
-                    self?.errorMessage = "Microphone access required for voice input"
+    func requestPermission() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            hasPermission = true
+            errorMessage = nil
+            return true
+        case .denied, .restricted:
+            hasPermission = false
+            errorMessage = "Microphone access denied. Please enable in System Settings > Privacy & Security > Microphone"
+            return false
+        case .notDetermined:
+            let granted = await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
                 }
             }
+            hasPermission = granted
+            errorMessage = granted ? nil : "Microphone access required for voice input"
+            return granted
+        @unknown default:
+            hasPermission = false
+            return false
         }
     }
 

@@ -8,6 +8,7 @@ class MainWindowController {
     private var window: NSWindow?
     private var windowDelegate: NSWindowDelegate?
     var hotkeyManager: HotkeyManager?
+    var audioRecorder: AudioRecorder?
 
     func show() {
         debugLog("MainWindowController.show() called")
@@ -26,7 +27,16 @@ class MainWindowController {
             return
         }
 
-        let mainView = MainView(settings: Settings.shared, hotkeyManager: hotkeyManager)
+        guard let audioRecorder = audioRecorder else {
+            debugLog("ERROR: audioRecorder not set on MainWindowController")
+            return
+        }
+
+        let mainView = MainView(
+            settings: Settings.shared,
+            hotkeyManager: hotkeyManager,
+            audioRecorder: audioRecorder
+        )
 
         let hostingView = NSHostingView(rootView: mainView)
         hostingView.frame = NSRect(x: 0, y: 0, width: 520, height: 700)

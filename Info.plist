@@ -17,14 +17,19 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.0</string>
     <key>LSUIElement</key>
     <false/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Airtype needs microphone access to record your voice for transcription.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Airtype needs accessibility access to insert text at your cursor position.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Airtype needs accessibility access to insert text at your cursor position.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

@@ -113,7 +113,7 @@ enum EnhancementProvider: String, CaseIterable, Identifiable {
         case .azure: return "https://YOUR-RESOURCE.openai.azure.com"
         case .cloudflare: return "https://api.cloudflare.com/client/v4/accounts/YOUR-ACCOUNT/ai/v1"
         case .lmstudio: return "http://localhost:1234/v1"
-        case .custom: return ""
+        case .custom: return "http://127.0.0.1:8080/v1"
         }
     }
 
@@ -122,7 +122,7 @@ enum EnhancementProvider: String, CaseIterable, Identifiable {
     }
 
     var requiresApiKey: Bool {
-        self != .lmstudio
+        self != .lmstudio && self != .custom
     }
 
     var defaultModel: String {
@@ -137,7 +137,7 @@ enum EnhancementProvider: String, CaseIterable, Identifiable {
         case .azure: return "gpt-4o"
         case .cloudflare: return "@cf/meta/llama-3-8b-instruct"
         case .lmstudio: return "local-model"
-        case .custom: return ""
+        case .custom: return "default_model"
         }
     }
 
@@ -162,8 +162,8 @@ enum EnhancementProvider: String, CaseIterable, Identifiable {
         case .openrouter: return "sk-or-..."
         case .groq: return "gsk_..."
         case .deepseek, .moonshot: return "sk-..."
-        case .togetherai, .zai, .cloudflare, .custom: return "API key..."
-        case .lmstudio: return "No key needed"
+        case .togetherai, .zai, .cloudflare: return "API key..."
+        case .lmstudio, .custom: return "Optional"
         }
     }
 }
@@ -173,6 +173,7 @@ enum EnhancementProvider: String, CaseIterable, Identifiable {
 enum FloatingWindowPosition: String, CaseIterable, Identifiable {
     case topRight = "Top Right"
     case bottomRight = "Bottom Right"
+    case bottomCenter = "Bottom Center"
     case topLeft = "Top Left"
     case bottomLeft = "Bottom Left"
 
@@ -183,6 +184,31 @@ enum FloatingWindowPosition: String, CaseIterable, Identifiable {
 
 class Settings: ObservableObject {
     static let shared = Settings()
+
+    static let defaultEnhancementPrompt = """
+    You are a speech-to-text error corrector. Fix transcription errors while preserving the speaker's original words as much as possible.
+
+    CORRECT these issues:
+    - Misrecognized words due to pronunciation, accent, or background noise
+    - Homophones: choose contextually correct form (your/you're, their/there/they're, its/it's)
+    - Technical terms and proper nouns: use correct casing (react → React, ios → iOS, github → GitHub)
+    - Numbers and dates: convert to numerals (twenty three → 23, december fifth → December 5th)
+    - Missing punctuation and capitalization
+    - Sentence boundaries: split run-on sentences properly
+    - Immediate word stutters: remove duplicates (I I I think → I think, the the → the)
+
+    DO NOT change:
+    - Filler words (um, uh, like, you know) - keep them
+    - Self-corrections (keep "Monday, no wait, Tuesday" exactly as spoken)
+    - User's grammar or dialect (preserve "I seen him" if that's what they said)
+    - Repeated phrases for emphasis (keep "I think, I think we should")
+    - Word choices or sentence structure
+
+    IMPORTANT:
+    - When uncertain if something is an error or intentional, leave it unchanged
+    - Be conservative - only fix clear transcription errors
+    - Return ONLY the corrected text, nothing else
+    """
 
     static var localModelRootURL: URL {
         if let existing = preferredLocalModelRootURLCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
@@ -273,10 +299,12 @@ class Settings: ObservableObject {
         static let localMLXInstalledModels = "local_mlx_installed_models"
         static let localMLXDownloadURLs = "local_mlx_download_urls"
         static let localMLXChecksums = "local_mlx_checksums"
+        static let muteSystemAudioWhileRecording = "mute_system_audio_while_recording"
 
         // Enhancement
         static let enhancementEnabled = "enhancement_enabled"
         static let enhancementProvider = "enhancement_provider"
+        static let enhancementPrompt = "enhancement_prompt"
 
         // Per-provider enhancement API keys
         static let enhancementApiKey_openai = "enhancement_api_key_openai"
@@ -391,6 +419,10 @@ class Settings: ObservableObject {
         didSet { defaults.set(localMLXChecksums, forKey: Keys.localMLXChecksums) }
     }
 
+    @Published var muteSystemAudioWhileRecording: Bool {
+        didSet { defaults.set(muteSystemAudioWhileRecording, forKey: Keys.muteSystemAudioWhileRecording) }
+    }
+
     // MARK: - Enhancement Settings
 
     @Published var enhancementEnabled: Bool {
@@ -399,6 +431,10 @@ class Settings: ObservableObject {
 
     @Published var enhancementProvider: EnhancementProvider {
         didSet { defaults.set(enhancementProvider.rawValue, forKey: Keys.enhancementProvider) }
+    }
+
+    @Published var enhancementPrompt: String {
+        didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
     }
 
     // Per-provider API keys for enhancement
@@ -680,12 +716,17 @@ class Settings: ObservableObject {
         self.localMLXInstalledModels = defaults.stringArray(forKey: Keys.localMLXInstalledModels) ?? []
         self.localMLXDownloadURLs = defaults.dictionary(forKey: Keys.localMLXDownloadURLs) as? [String: String] ?? [:]
         self.localMLXChecksums = defaults.dictionary(forKey: Keys.localMLXChecksums) as? [String: String] ?? [:]
+        self.muteSystemAudioWhileRecording = defaults.object(forKey: Keys.muteSystemAudioWhileRecording) as? Bool ?? false
 
         // Enhancement settings
         self.enhancementEnabled = defaults.object(forKey: Keys.enhancementEnabled) as? Bool ?? true
 
         let enhancementProviderRaw = defaults.string(forKey: Keys.enhancementProvider) ?? EnhancementProvider.openai.rawValue
         self.enhancementProvider = EnhancementProvider(rawValue: enhancementProviderRaw) ?? .openai
+        let savedEnhancementPrompt = defaults.string(forKey: Keys.enhancementPrompt)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.enhancementPrompt = savedEnhancementPrompt?.isEmpty == false
+            ? savedEnhancementPrompt!
+            : Settings.defaultEnhancementPrompt
 
         // Initialize per-provider enhancement API keys
         var apiKeys: [EnhancementProvider: String] = [:]
@@ -705,7 +746,8 @@ class Settings: ObservableObject {
         var models: [EnhancementProvider: String] = [:]
         for provider in EnhancementProvider.allCases {
             let key = "enhancement_model_\(provider.rawValue.lowercased().replacingOccurrences(of: " ", with: "_"))"
-            models[provider] = defaults.string(forKey: key) ?? provider.defaultModel
+            let savedModel = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            models[provider] = savedModel?.isEmpty == false ? savedModel! : provider.defaultModel
         }
         self.enhancementModels = models
 
@@ -713,7 +755,8 @@ class Settings: ObservableObject {
         var baseURLs: [EnhancementProvider: String] = [:]
         baseURLs[.azure] = defaults.string(forKey: Keys.enhancementBaseURL_azure) ?? EnhancementProvider.azure.baseURL
         baseURLs[.cloudflare] = defaults.string(forKey: Keys.enhancementBaseURL_cloudflare) ?? EnhancementProvider.cloudflare.baseURL
-        baseURLs[.custom] = defaults.string(forKey: Keys.enhancementBaseURL_custom) ?? ""
+        let savedCustomURL = defaults.string(forKey: Keys.enhancementBaseURL_custom)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        baseURLs[.custom] = savedCustomURL?.isEmpty == false ? savedCustomURL! : EnhancementProvider.custom.baseURL
         self.enhancementBaseURLs = baseURLs
 
         // Keyboard shortcut settings
@@ -740,8 +783,8 @@ class Settings: ObservableObject {
 
         // Floating window settings
         self.showFloatingWindow = defaults.object(forKey: Keys.showFloatingWindow) as? Bool ?? true
-        let positionRaw = defaults.string(forKey: Keys.floatingWindowPosition) ?? FloatingWindowPosition.bottomRight.rawValue
-        self.floatingWindowPosition = FloatingWindowPosition(rawValue: positionRaw) ?? .bottomRight
+        let positionRaw = defaults.string(forKey: Keys.floatingWindowPosition) ?? FloatingWindowPosition.bottomCenter.rawValue
+        self.floatingWindowPosition = FloatingWindowPosition(rawValue: positionRaw) ?? .bottomCenter
         self.previewBeforeInsert = defaults.object(forKey: Keys.previewBeforeInsert) as? Bool ?? false
         self.hasCompletedSetup = defaults.object(forKey: Keys.hasCompletedSetup) as? Bool ?? false
     }

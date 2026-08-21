@@ -22,9 +22,15 @@ enum Theme {
 struct MainView: View {
     @ObservedObject var settings: Settings
     @ObservedObject var hotkeyManager: HotkeyManager
+    @ObservedObject var audioRecorder: AudioRecorder
     @State private var hasAccessibility = AXIsProcessTrusted()
     @StateObject private var updateChecker = UpdateChecker()
     @StateObject private var localModelManager = LocalModelManager()
+    @State private var availableCustomModels: [String] = []
+    @State private var customModelLoadError: String?
+    @State private var isLoadingCustomModels = false
+    @State private var isEditingEnhancementPrompt = false
+    @State private var enhancementPromptDraft = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +60,16 @@ struct MainView: View {
         .background(Theme.bg)
         .tint(Theme.brand)
         .onAppear { updateChecker.check() }
+        .sheet(isPresented: $isEditingEnhancementPrompt) {
+            EnhancementPromptEditor(
+                prompt: $enhancementPromptDraft,
+                onSave: {
+                    settings.enhancementPrompt = enhancementPromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    isEditingEnhancementPrompt = false
+                },
+                onCancel: { isEditingEnhancementPrompt = false }
+            )
+        }
     }
 
     // MARK: - Header
@@ -181,6 +197,20 @@ struct MainView: View {
                 SettingsCardDivider()
 
                 transcriptionStatus
+            }
+
+            SettingsCard {
+                Toggle(isOn: $settings.muteSystemAudioWhileRecording) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mute system audio while recording")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Restore the previous audio state after transcription finishes")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .toggleStyle(.switch)
             }
         }
     }
@@ -446,7 +476,7 @@ struct MainView: View {
                         .labelsHidden()
                     }
 
-                    if settings.enhancementProvider.requiresApiKey {
+                    if settings.enhancementProvider.requiresApiKey || settings.enhancementProvider == .custom {
                         SettingsCardDivider()
                         SettingsCardRow(label: "API Key") {
                             HStack(spacing: 6) {
@@ -466,7 +496,11 @@ struct MainView: View {
                         SettingsCardRow(label: "Base URL") {
                             TextField(settings.enhancementProvider.baseURL, text: Binding(
                                 get: { settings.currentEnhancementBaseURL },
-                                set: { settings.currentEnhancementBaseURL = $0 }
+                                set: {
+                                    settings.currentEnhancementBaseURL = $0
+                                    availableCustomModels = []
+                                    customModelLoadError = nil
+                                }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11, design: .monospaced))
@@ -476,12 +510,64 @@ struct MainView: View {
                     SettingsCardDivider()
 
                     SettingsCardRow(label: "Model") {
-                        TextField(settings.enhancementProvider.defaultModel, text: Binding(
-                            get: { settings.currentEnhancementModel },
-                            set: { settings.currentEnhancementModel = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11, design: .monospaced))
+                        VStack(alignment: .trailing, spacing: 4) {
+                            HStack(spacing: 6) {
+                                TextField(settings.enhancementProvider.defaultModel, text: Binding(
+                                    get: { settings.currentEnhancementModel },
+                                    set: { settings.currentEnhancementModel = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
+
+                                if settings.enhancementProvider == .custom {
+                                    Menu {
+                                        ForEach(availableCustomModels, id: \.self) { model in
+                                            Button(model) { settings.currentEnhancementModel = model }
+                                        }
+                                    } label: {
+                                        Image(systemName: "list.bullet")
+                                    }
+                                    .menuStyle(.borderlessButton)
+                                    .frame(width: 24)
+                                    .disabled(availableCustomModels.isEmpty)
+                                    .help("Select a model returned by the endpoint")
+
+                                    Button(action: loadCustomModels) {
+                                        if isLoadingCustomModels {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "arrow.clockwise")
+                                        }
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(isLoadingCustomModels)
+                                    .help("Load models from /models")
+                                }
+                            }
+
+                            if settings.enhancementProvider == .custom {
+                                if let customModelLoadError {
+                                    Text(customModelLoadError)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Theme.statusRed)
+                                } else if !availableCustomModels.isEmpty {
+                                    Text("\(availableCustomModels.count) models available")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCardDivider()
+
+                    SettingsCardRow(label: "Correction Prompt") {
+                        Button("Edit Prompt…") {
+                            enhancementPromptDraft = settings.enhancementPrompt
+                            isEditingEnhancementPrompt = true
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
 
                     SettingsCardDivider()
@@ -507,6 +593,25 @@ struct MainView: View {
             }
         }
         .font(.system(size: 11))
+    }
+
+    private func loadCustomModels() {
+        isLoadingCustomModels = true
+        customModelLoadError = nil
+
+        Task { @MainActor in
+            do {
+                let models = try await EnhancementService(settings: settings).fetchAvailableModels()
+                availableCustomModels = models
+                if models.isEmpty {
+                    customModelLoadError = "The endpoint returned no models"
+                }
+            } catch {
+                availableCustomModels = []
+                customModelLoadError = error.localizedDescription
+            }
+            isLoadingCustomModels = false
+        }
     }
 
     // MARK: - Floating Window
@@ -612,11 +717,21 @@ struct MainView: View {
                             .foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
-                    Button("Open Settings") {
-                        openMicrophoneSettings()
+                    if audioRecorder.hasPermission {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.statusGreen)
+                    } else {
+                        Button("Grant Access") {
+                            Task {
+                                let granted = await audioRecorder.requestPermission()
+                                if !granted {
+                                    openMicrophoneSettings()
+                                }
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
 
                 SettingsCardDivider()
@@ -672,6 +787,53 @@ struct MainView: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+    }
+}
+
+private struct EnhancementPromptEditor: View {
+    @Binding var prompt: String
+    let onSave: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Correction Prompt")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("This system prompt controls transcription correction, filler words, self-corrections, and formatting.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            TextEditor(text: $prompt)
+                .font(.system(size: 12, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Theme.cardBg)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+
+            HStack {
+                Button("Restore Default") {
+                    prompt = Settings.defaultEnhancementPrompt
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: onSave)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 600, height: 520)
+        .background(Theme.bg)
     }
 }
 

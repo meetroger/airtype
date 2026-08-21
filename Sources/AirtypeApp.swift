@@ -75,7 +75,7 @@ class FloatingWindowManager: ObservableObject {
 
         updateContent(with: appState)
         panel?.orderFront(nil)
-        panel?.position(at: appState.settings.floatingWindowPosition)
+        panel?.position(at: appState.settings.floatingWindowPosition, on: FocusedScreenLocator.current())
         isVisible = true
     }
 
@@ -230,6 +230,7 @@ class AppState: ObservableObject {
     let mlxTranscriptionService = MLXTranscriptionService()
     let enhancementService = EnhancementService()
     let textInserter = TextInserter()
+    let systemAudioMuter = SystemAudioMuter()
     let hotkeyManager = HotkeyManager()
     let floatingWindowManager = FloatingWindowManager.shared
     private var streamingCapture: StreamingAudioCapture?
@@ -254,6 +255,7 @@ class AppState: ObservableObject {
     init() {
         setupHotkeyCallbacks()
         MainWindowController.shared.hotkeyManager = hotkeyManager
+        MainWindowController.shared.audioRecorder = audioRecorder
         Task { @MainActor in
             if settings.hasCompletedSetup {
                 MainWindowController.shared.show()
@@ -375,11 +377,19 @@ class AppState: ObservableObject {
         }
 
         do {
+            guard await audioRecorder.requestPermission() else {
+                throw RecordingError.noPermission
+            }
+
             if shouldUseStreaming {
                 try await startStreamingRecording()
             } else {
                 let url = try audioRecorder.startRecording()
                 debugLog("Recording started, saving to: \(url.path)")
+            }
+
+            if settings.muteSystemAudioWhileRecording {
+                systemAudioMuter.mute()
             }
 
             isRecording = true
@@ -481,6 +491,7 @@ class AppState: ObservableObject {
             debugLog("Streaming transcription result: \(transcription)")
             streamOutput("\n--- Raw transcription (streaming) ---")
             streamOutput(transcription)
+            systemAudioMuter.restore()
 
             if transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw WhisperError.emptyRecording
@@ -559,6 +570,10 @@ class AppState: ObservableObject {
             debugLog("Not recording, skipping")
             return
         }
+
+        // Keep other audio muted through transcription/enhancement, and always
+        // restore the exact prior output state on every completion path.
+        defer { systemAudioMuter.restore() }
 
         if shouldUseStreaming {
             await stopStreamingAndProcess()
@@ -662,6 +677,7 @@ class AppState: ObservableObject {
             debugLog("Transcription result: \(transcription)")
             streamOutput("\n\n--- Raw transcription ---")
             streamOutput(transcription)
+            systemAudioMuter.restore()
 
             // Check for empty transcription
             if transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -769,6 +785,7 @@ class AppState: ObservableObject {
         isRecording = false
         recordingStartTime = nil
         partialTranscription = ""
+        systemAudioMuter.restore()
     }
 
     func cancelProcessing() {
@@ -790,6 +807,7 @@ class AppState: ObservableObject {
         partialTranscription = ""
         lastError = nil
         lastNotice = "Processing cancelled"
+        systemAudioMuter.restore()
         if settings.showFloatingWindow {
             let manager = floatingWindowManager
             Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
