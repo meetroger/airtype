@@ -1,5 +1,6 @@
 import ApplicationServices
 import HotKey
+import ServiceManagement
 import SwiftUI
 
 // MARK: - Design Tokens
@@ -19,7 +20,50 @@ enum Theme {
 
 // MARK: - Main View
 
+@MainActor
+private final class LaunchAtLoginManager: ObservableObject {
+    @Published private(set) var isRegistered = false
+    @Published private(set) var requiresApproval = false
+    @Published private(set) var errorMessage: String?
+
+    init() {
+        refresh()
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        errorMessage = nil
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        refresh()
+    }
+
+    func refresh() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            isRegistered = true
+            requiresApproval = false
+        case .requiresApproval:
+            isRegistered = true
+            requiresApproval = true
+        case .notRegistered, .notFound:
+            isRegistered = false
+            requiresApproval = false
+        @unknown default:
+            isRegistered = false
+            requiresApproval = false
+        }
+    }
+}
+
 private enum SettingsTab: String, CaseIterable, Identifiable {
+    case general = "General"
     case voice = "Voice"
     case ai = "AI"
     case window = "Window"
@@ -29,6 +73,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .general: return "gearshape.fill"
         case .voice: return "mic.fill"
         case .ai: return "wand.and.stars"
         case .window: return "macwindow"
@@ -44,12 +89,13 @@ struct MainView: View {
     @State private var hasAccessibility = AXIsProcessTrusted()
     @StateObject private var updateChecker = UpdateChecker()
     @StateObject private var localModelManager = LocalModelManager()
+    @StateObject private var launchAtLoginManager = LaunchAtLoginManager()
     @State private var availableCustomModels: [String] = []
     @State private var customModelLoadError: String?
     @State private var isLoadingCustomModels = false
     @State private var isEditingEnhancementPrompt = false
     @State private var enhancementPromptDraft = ""
-    @State private var selectedSettingsTab: SettingsTab = .voice
+    @State private var selectedSettingsTab: SettingsTab = .general
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,7 +108,7 @@ struct MainView: View {
                     if updateChecker.updateAvailable {
                         updateBanner
                     }
-                    if selectedSettingsTab == .voice && !hasAccessibility {
+                    if selectedSettingsTab == .general && !hasAccessibility {
                         accessibilityBanner
                     }
                     if let error = settings.configurationError {
@@ -77,6 +123,10 @@ struct MainView: View {
         .background(Theme.bg)
         .tint(Theme.brand)
         .onAppear { updateChecker.check() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            hasAccessibility = AXIsProcessTrusted()
+            launchAtLoginManager.refresh()
+        }
         .sheet(isPresented: $isEditingEnhancementPrompt) {
             EnhancementPromptEditor(
                 prompt: $enhancementPromptDraft,
@@ -106,15 +156,62 @@ struct MainView: View {
     @ViewBuilder
     private var selectedSettingsContent: some View {
         switch selectedSettingsTab {
+        case .general:
+            applicationSection
+            permissionsSection
         case .voice:
             voiceInputSection
-            permissionsSection
         case .ai:
             enhancementSection
         case .window:
             floatingWindowSection
         case .shortcuts:
             shortcutsSection
+        }
+    }
+
+    // MARK: - Application
+
+    private var applicationSection: some View {
+        SettingsSection(title: "Application", icon: "gearshape.fill") {
+            SettingsCard {
+                Toggle(isOn: Binding(
+                    get: { launchAtLoginManager.isRegistered },
+                    set: { launchAtLoginManager.setEnabled($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Launch at login")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Start Airtype silently in the menu bar when you sign in")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if launchAtLoginManager.requiresApproval {
+                    SettingsCardDivider()
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.statusOrange)
+                        Text("Approval required in System Settings → General → Login Items")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                    }
+                } else if let errorMessage = launchAtLoginManager.errorMessage {
+                    SettingsCardDivider()
+                    HStack(spacing: 8) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Theme.statusRed)
+                        Text(errorMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                    }
+                }
+            }
         }
     }
 

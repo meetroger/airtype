@@ -376,9 +376,7 @@ class AppState: ObservableObject {
         MainWindowController.shared.hotkeyManager = hotkeyManager
         MainWindowController.shared.audioRecorder = audioRecorder
         Task { @MainActor in
-            if settings.hasCompletedSetup {
-                MainWindowController.shared.show()
-            } else {
+            if !settings.hasCompletedSetup {
                 MainWindowController.shared.showWizard()
             }
         }
