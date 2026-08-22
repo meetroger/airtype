@@ -35,7 +35,7 @@ struct MenuBarView: View {
                     AudioLevelMeter(level: appState.audioRecorder.audioLevel, peakLevel: appState.audioRecorder.peakLevel)
 
                     // Hint text
-                    Text("Release to transcribe")
+                    Text(appState.recordingMode?.recordingHint ?? "Recording")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.8))
 

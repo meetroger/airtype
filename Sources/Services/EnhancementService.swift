@@ -16,9 +16,34 @@ class EnhancementService {
             return text
         }
 
-        // Skip enhancement for very short text
+        return try await process(
+            text: text,
+            prompt: enhancementPrompt,
+            operation: "Enhancement",
+            skipVeryShortText: true
+        )
+    }
+
+    /// Translates transcribed speech to English using the configured enhancement model.
+    /// This is intentionally independent of the correction toggle because push-to-talk
+    /// always represents the translate-to-English workflow.
+    func translateToEnglish(text: String) async throws -> String {
+        try await process(
+            text: text,
+            prompt: translationPrompt,
+            operation: "Translation",
+            skipVeryShortText: false
+        )
+    }
+
+    private func process(
+        text: String,
+        prompt: String,
+        operation: String,
+        skipVeryShortText: Bool
+    ) async throws -> String {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedText.count < 3 {
+        if trimmedText.isEmpty || (skipVeryShortText && trimmedText.count < 3) {
             return trimmedText
         }
 
@@ -52,7 +77,7 @@ class EnhancementService {
         let requestBody = ChatCompletionRequest(
             model: enhancementModel,
             messages: [
-                ChatMessage(role: systemRole, content: enhancementPrompt),
+                ChatMessage(role: systemRole, content: prompt),
                 ChatMessage(role: "user", content: text)
             ],
             temperature: supportsTemperature ? 0.1 : nil,
@@ -84,12 +109,12 @@ class EnhancementService {
         if httpResponse.statusCode != 200 {
             // Log raw error response
             if let rawError = String(data: data, encoding: .utf8) {
-                debugLog("Enhancement: Error response (\(httpResponse.statusCode)): \(rawError)")
+                debugLog("\(operation): Error response (\(httpResponse.statusCode)): \(rawError)")
             }
 
             if let errorResponse = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data) {
                 let message = errorResponse.error.message
-                debugLog("Enhancement: API error message: \(message)")
+                debugLog("\(operation): API error message: \(message)")
 
                 // Detect specific error types
                 if message.lowercased().contains("rate limit") {
@@ -166,6 +191,27 @@ class EnhancementService {
     private var enhancementPrompt: String {
         let prompt = settings.enhancementPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         return prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
+    }
+
+    private var translationPrompt: String {
+        """
+        You are a professional speech-to-text editor and translator. In ONE pass, clean up the user's transcribed speech and translate the intended result into natural, accurate English.
+
+        Apply the relevant correction preferences below while interpreting the transcript. They may contain an instruction to preserve the source language or not translate; ignore only those language/output restrictions for this task, because the final result MUST be English. Continue to follow their rules about transcription errors, filler words, repetitions, self-corrections, terminology, meaning, tone, and formatting.
+
+        --- CORRECTION PREFERENCES ---
+        \(enhancementPrompt)
+        --- END CORRECTION PREFERENCES ---
+
+        TRANSLATION REQUIREMENTS:
+        - Detect the source language automatically and translate it to English.
+        - If the input is already English, preserve it in English and only fix obvious speech-recognition errors.
+        - Preserve the original meaning, tone, level of formality, names, numbers, dates, technical terms, product names, code, commands, URLs, file paths, and API identifiers.
+        - Resolve obvious speech-recognition mistakes from context, but do not invent missing information.
+        - Do not summarize, explain, answer, or add information.
+        - The final output MUST be entirely in English except for proper nouns, code, identifiers, or terms that should remain unchanged.
+        - Return ONLY the final cleaned English text, with no labels, quotation marks, or Markdown.
+        """
     }
 }
 

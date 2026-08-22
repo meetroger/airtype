@@ -373,7 +373,7 @@ struct SetupWizardView: View {
                         Text("Push-to-talk")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Hold to record, release to transcribe and insert")
+                        Text("Hold to record, release to translate and insert")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textSecondary)
                     }

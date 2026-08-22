@@ -34,6 +34,87 @@ func streamOutput(_ text: String, newline: Bool = true) {
     fflush(stdout)
 }
 
+/// Converts explicitly dictated punctuation names into the symbols the speaker
+/// intended before enhancement or translation. This keeps the behavior working
+/// even when LLM enhancement is disabled.
+enum SpokenPunctuationFormatter {
+    static func format(_ text: String) -> String {
+        var result = text
+
+        // Longer phrases must be replaced first because some contain shorter
+        // command names (for example, "左双引号" contains "引号").
+        let chineseCommands: [(String, String)] = [
+            ("另起一行", "\n"), ("另起一段", "\n\n"),
+            ("新的一行", "\n"), ("新的一段", "\n\n"),
+            ("換行符", "\n"), ("换行符", "\n"),
+            ("左雙引號", "“"), ("左双引号", "“"),
+            ("右雙引號", "”"), ("右双引号", "”"),
+            ("左括號", "（"), ("左括号", "（"),
+            ("右括號", "）"), ("右括号", "）"),
+            ("感嘆號", "！"), ("感叹号", "！"),
+            ("驚嘆號", "！"), ("惊叹号", "！"),
+            ("省略號", "……"), ("省略号", "……"),
+            ("破折號", "——"), ("破折号", "——"),
+            ("問號", "？"), ("问号", "？"),
+            ("句號", "。"), ("句号", "。"),
+            ("逗號", "，"), ("逗号", "，"),
+            ("頓號", "、"), ("顿号", "、"),
+            ("分號", "；"), ("分号", "；"),
+            ("冒號", "："), ("冒号", "："),
+            ("換行", "\n"), ("换行", "\n"),
+            ("空格符", " "), ("空格", " ")
+        ]
+        for (spoken, symbol) in chineseCommands {
+            result = result.replacingOccurrences(of: spoken, with: symbol)
+        }
+
+        let englishCommands: [(String, String)] = [
+            (#"new\s+paragraph"#, "\n\n"),
+            (#"new\s+line|newline"#, "\n"),
+            (#"question\s+mark"#, "? "),
+            (#"exclamation\s+(?:mark|point)"#, "! "),
+            (#"full\s+stop|period"#, ". "),
+            (#"semicolon"#, "; "),
+            (#"colon"#, ": "),
+            (#"comma"#, ", "),
+            (#"open\s+(?:parenthesis|paren)"#, "("),
+            (#"close\s+(?:parenthesis|paren)"#, ") "),
+            (#"open\s+(?:quote|quotation\s+mark)"#, "\""),
+            (#"close\s+(?:quote|quotation\s+mark)"#, "\" "),
+            (#"backslash"#, "\\"),
+            (#"forward\s+slash"#, "/"),
+            (#"hyphen"#, "-")
+        ]
+        for (command, symbol) in englishCommands {
+            result = result.replacingOccurrences(
+                of: #"(?i)[ \t]*\b(?:"# + command + #")\b[ \t]*"#,
+                with: symbol,
+                options: .regularExpression
+            )
+        }
+
+        // Remove recognition-added spaces around Chinese punctuation without
+        // otherwise rewriting the user's spacing or code-like content.
+        result = result.replacingOccurrences(
+            of: #"[ \t]+([，。？！：；、）”])"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"([（“])[ \t]+"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"[ \t]*\n[ \t]*"#,
+            with: "\n",
+            options: .regularExpression
+        )
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
@@ -172,13 +253,13 @@ struct MenuBarIcon: View {
     var body: some View {
         if #available(macOS 14.0, *) {
             Image(systemName: iconName)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(iconColor)
                 .symbolEffect(.pulse, isActive: isRecording)
         } else {
             // Fallback for macOS 13
             Image(systemName: iconName)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(iconColor)
         }
     }
@@ -207,6 +288,20 @@ struct MenuBarIcon: View {
 /// Main application state coordinator
 @MainActor
 class AppState: ObservableObject {
+    enum RecordingMode {
+        case transcribe
+        case translateToEnglish
+
+        var recordingHint: String {
+            switch self {
+            case .transcribe:
+                return "Press the toggle shortcut again to transcribe"
+            case .translateToEnglish:
+                return "Release to translate"
+            }
+        }
+    }
+
     @Published var isRecording = false
     @Published var isProcessing = false
     @Published var processingStage = ""
@@ -216,6 +311,7 @@ class AppState: ObservableObject {
     @Published var lastError: String?
     @Published var lastNotice: String?
     @Published var recordingStartTime: Date?
+    @Published private(set) var recordingMode: RecordingMode?
 
     // For streaming output tracking
     private var lastStreamedLength = 0
@@ -239,6 +335,13 @@ class AppState: ObservableObject {
     private var preconnectedStreamingService: DoubaoStreamingService?
     private var preconnectTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
+    private var isStartingPushToTalk = false
+    private var pushToTalkReleasePending = false
+    private var isStopRequested = false
+    private var sharedShortcutHoldTask: Task<Void, Never>?
+    private var sharedShortcutStartedRecording = false
+    private var sharedShortcutStopsToggle = false
+    private let sharedShortcutHoldDelay: UInt64 = 350_000_000
 
     var menuBarIcon: String {
         if isRecording {
@@ -277,10 +380,26 @@ class AppState: ObservableObject {
         hotkeyManager.onPushToTalkStart = { [weak self] in
             Task { @MainActor in
                 guard let self = self else { return }
+                if self.hotkeyManager.usesSharedShortcut {
+                    await self.handleSharedShortcutDown()
+                    return
+                }
+                debugLog("Push-to-talk key down")
                 if self.isProcessing {
                     self.cancelProcessing()
                 } else {
-                    await self.startRecording()
+                    self.pushToTalkReleasePending = false
+                    self.isStartingPushToTalk = true
+                    await self.startRecording(mode: .translateToEnglish)
+                    self.isStartingPushToTalk = false
+
+                    // A quick release can arrive while microphone permission or
+                    // the recorder is still starting. Honor it as soon as startup
+                    // completes instead of requiring a second key press.
+                    if self.pushToTalkReleasePending || !self.hotkeyManager.isPushToTalkPressed {
+                        self.pushToTalkReleasePending = false
+                        self.requestStop(for: .translateToEnglish)
+                    }
                 }
             }
         }
@@ -289,9 +408,16 @@ class AppState: ObservableObject {
         hotkeyManager.onPushToTalkEnd = { [weak self] in
             Task { @MainActor in
                 guard let self = self else { return }
-                self.processingTask = Task { @MainActor in
-                    await self.stopAndProcess()
+                if self.hotkeyManager.usesSharedShortcut {
+                    self.handleSharedShortcutUp()
+                    return
                 }
+                debugLog("Push-to-talk key up, starting: \(self.isStartingPushToTalk), recording: \(self.isRecording), mode: \(String(describing: self.recordingMode))")
+                if self.isStartingPushToTalk {
+                    self.pushToTalkReleasePending = true
+                    return
+                }
+                self.requestStop(for: .translateToEnglish)
             }
         }
 
@@ -302,13 +428,96 @@ class AppState: ObservableObject {
                 if self.isProcessing {
                     self.cancelProcessing()
                 } else if self.isRecording {
-                    self.processingTask = Task { @MainActor in
-                        await self.stopAndProcess()
-                    }
+                    self.requestStop(for: .transcribe)
                 } else {
-                    await self.startRecording()
+                    await self.startRecording(mode: .transcribe)
                 }
             }
+        }
+    }
+
+    private func handleSharedShortcutDown() async {
+        debugLog("Shared shortcut key down")
+        sharedShortcutHoldTask?.cancel()
+        sharedShortcutHoldTask = nil
+        sharedShortcutStartedRecording = false
+        sharedShortcutStopsToggle = false
+
+        if isProcessing {
+            cancelProcessing()
+            return
+        }
+
+        if isRecording {
+            // A tap while Toggle recording is active stops that recording.
+            sharedShortcutStopsToggle = recordingMode == .transcribe
+            return
+        }
+
+        sharedShortcutStartedRecording = true
+        pushToTalkReleasePending = false
+        isStartingPushToTalk = true
+
+        // Recording begins immediately as normal transcription so the first
+        // syllable is never lost. Holding past the threshold promotes the same
+        // recording to the one-pass English translation workflow.
+        sharedShortcutHoldTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: self?.sharedShortcutHoldDelay ?? 350_000_000)
+            } catch {
+                return
+            }
+            guard let self,
+                  self.hotkeyManager.isPushToTalkPressed,
+                  self.sharedShortcutStartedRecording,
+                  self.recordingMode == .transcribe else { return }
+            self.recordingMode = .translateToEnglish
+            debugLog("Shared shortcut promoted to Push-to-talk translation")
+        }
+
+        await startRecording(mode: .transcribe)
+        isStartingPushToTalk = false
+
+        if pushToTalkReleasePending && recordingMode == .translateToEnglish {
+            pushToTalkReleasePending = false
+            requestStop(for: .translateToEnglish)
+        }
+    }
+
+    private func handleSharedShortcutUp() {
+        debugLog("Shared shortcut key up, recording: \(isRecording), mode: \(String(describing: recordingMode))")
+        sharedShortcutHoldTask?.cancel()
+        sharedShortcutHoldTask = nil
+
+        if sharedShortcutStopsToggle {
+            sharedShortcutStopsToggle = false
+            requestStop(for: .transcribe)
+        } else if recordingMode == .translateToEnglish {
+            if isStartingPushToTalk {
+                pushToTalkReleasePending = true
+            } else {
+                requestStop(for: .translateToEnglish)
+            }
+        }
+
+        // If this was a quick initial tap, intentionally leave the transcription
+        // recording active until the next tap.
+        sharedShortcutStartedRecording = false
+    }
+
+    private func requestStop(for expectedMode: RecordingMode) {
+        guard !isStopRequested,
+              isRecording,
+              recordingMode == expectedMode else {
+            debugLog("Ignoring stop request, requested: \(expectedMode), recording: \(isRecording), mode: \(String(describing: recordingMode)), alreadyRequested: \(isStopRequested)")
+            return
+        }
+
+        isStopRequested = true
+        processingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.stopAndProcess()
+            self.isStopRequested = false
         }
     }
 
@@ -364,8 +573,8 @@ class AppState: ObservableObject {
         settings.transcriptionProvider.supportsStreaming
     }
 
-    func startRecording() async {
-        debugLog("startRecording called")
+    func startRecording(mode: RecordingMode) async {
+        debugLog("startRecording called, mode: \(mode)")
         guard !isRecording && !isProcessing else {
             debugLog("Already recording or processing, skipping")
             return
@@ -375,6 +584,16 @@ class AppState: ObservableObject {
             lastError = settings.configurationError ?? "Please configure API keys in Settings"
             return
         }
+        if mode == .translateToEnglish,
+           settings.enhancementProvider.requiresApiKey,
+           settings.currentEnhancementApiKey.isEmpty {
+            lastError = "\(settings.enhancementProvider.rawValue) API key required for Push-to-talk translation"
+            return
+        }
+
+        // Set the intent before awaiting microphone permission so a key-up
+        // event that arrives during startup still belongs to this recording.
+        recordingMode = mode
 
         do {
             guard await audioRecorder.requestPermission() else {
@@ -393,6 +612,7 @@ class AppState: ObservableObject {
             }
 
             isRecording = true
+            isStopRequested = false
             recordingStartTime = Date()
             lastError = nil
             lastNotice = nil
@@ -404,6 +624,7 @@ class AppState: ObservableObject {
             }
         } catch {
             debugLog("Failed to start recording: \(error)")
+            recordingMode = nil
             lastError = error.localizedDescription
         }
     }
@@ -463,6 +684,7 @@ class AppState: ObservableObject {
     }
 
     private func stopStreamingAndProcess() async {
+        let mode = recordingMode ?? .transcribe
         streamingCapture?.stop()
         streamingCapture = nil
 
@@ -483,33 +705,27 @@ class AppState: ObservableObject {
 
             // Use the most complete text: partialTranscription has the latest
             // partial view, finalizedStreamText has all locked-in utterances.
-            let transcription = partialTranscription.count >= finalizedStreamText.count
+            let rawTranscription = partialTranscription.count >= finalizedStreamText.count
                 ? partialTranscription : finalizedStreamText
+            let transcription = SpokenPunctuationFormatter.format(rawTranscription)
             await streamingService?.disconnect()
             streamingService = nil
 
-            debugLog("Streaming transcription result: \(transcription)")
+            debugLog("Streaming raw transcription result: \(rawTranscription)")
             streamOutput("\n--- Raw transcription (streaming) ---")
-            streamOutput(transcription)
+            streamOutput(rawTranscription)
+            if transcription != rawTranscription {
+                debugLog("Spoken punctuation formatted: \(transcription)")
+                streamOutput("\n--- Punctuation formatted ---")
+                streamOutput(transcription)
+            }
             systemAudioMuter.restore()
 
             if transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw WhisperError.emptyRecording
             }
 
-            // Enhancement
-            let finalText: String
-            if settings.enhancementEnabled {
-                debugLog("Starting enhancement...")
-                streamOutput("\n--- Correcting errors... ---")
-                processingProgress = 0.75
-                finalText = try await enhancementService.enhance(text: transcription)
-                debugLog("Enhanced result: \(finalText)")
-                streamOutput("\n--- Corrected text ---")
-                streamOutput(finalText)
-            } else {
-                finalText = transcription
-            }
+            let finalText = try await prepareFinalText(from: transcription, mode: mode)
 
             // Insert (bail out if cancelled while enhancing)
             try Task.checkCancellation()
@@ -518,6 +734,7 @@ class AppState: ObservableObject {
                 partialTranscription = finalText
                 processingProgress = 1.0
                 isProcessing = false
+                recordingMode = nil
                 lastError = nil
                 lastNotice = nil
             } else {
@@ -532,6 +749,7 @@ class AppState: ObservableObject {
                 lastError = nil
                 lastNotice = nil
                 isProcessing = false
+                recordingMode = nil
                 processingStage = ""
                 processingProgress = 0.0
                 partialTranscription = ""
@@ -552,6 +770,7 @@ class AppState: ObservableObject {
                 lastError = error.localizedDescription
             }
             isProcessing = false
+            recordingMode = nil
             processingStage = ""
             processingProgress = 0.0
             streamingEventTask?.cancel()
@@ -570,6 +789,7 @@ class AppState: ObservableObject {
             debugLog("Not recording, skipping")
             return
         }
+        let mode = recordingMode ?? .transcribe
 
         // Keep other audio muted through transcription/enhancement, and always
         // restore the exact prior output state on every completion path.
@@ -585,6 +805,7 @@ class AppState: ObservableObject {
             lastError = "No recording to process"
             isRecording = false
             recordingStartTime = nil
+            recordingMode = nil
             return
         }
 
@@ -605,6 +826,7 @@ class AppState: ObservableObject {
             audioRecorder.cleanupRecording(at: audioURL)
             isRecording = false
             recordingStartTime = nil
+            recordingMode = nil
             return
         }
 
@@ -615,6 +837,7 @@ class AppState: ObservableObject {
             audioRecorder.cleanupRecording(at: audioURL)
             isRecording = false
             recordingStartTime = nil
+            recordingMode = nil
             return
         }
 
@@ -631,11 +854,11 @@ class AppState: ObservableObject {
             processingStage = "Thinking..."
             streamOutput("\n--- Transcribing (\(settings.transcriptionProvider.rawValue))... ---")
             lastStreamedLength = 0
-            let transcription: String
+            let rawTranscription: String
 
             switch settings.transcriptionProvider {
             case .openai:
-                transcription = try await whisperService.transcribeWithProgress(audioURL: audioURL) { [weak self] progress in
+                rawTranscription = try await whisperService.transcribeWithProgress(audioURL: audioURL) { [weak self] progress in
                     Task { @MainActor in
                         guard let self = self else { return }
                         self.processingProgress = progress.progress * 0.7  // Transcription is 70% of total
@@ -659,13 +882,13 @@ class AppState: ObservableObject {
                     }
                 }
             case .elevenlabs:
-                transcription = try await elevenlabsService.transcribe(audioURL: audioURL)
+                rawTranscription = try await elevenlabsService.transcribe(audioURL: audioURL)
             case .mistral:
-                transcription = try await mistralTranscriptionService.transcribe(audioURL: audioURL)
+                rawTranscription = try await mistralTranscriptionService.transcribe(audioURL: audioURL)
             case .doubao:
                 throw WhisperError.emptyRecording // Doubao is streaming-only; non-streaming path shouldn't reach here
             case .localMLX:
-                transcription = try await mlxTranscriptionService.transcribe(
+                rawTranscription = try await mlxTranscriptionService.transcribe(
                     audioURL: audioURL,
                     model: settings.localMLXModel,
                     language: settings.localMLXLanguage,
@@ -674,9 +897,16 @@ class AppState: ObservableObject {
                 )
             }
 
-            debugLog("Transcription result: \(transcription)")
+            let transcription = SpokenPunctuationFormatter.format(rawTranscription)
+
+            debugLog("Raw transcription result: \(rawTranscription)")
             streamOutput("\n\n--- Raw transcription ---")
-            streamOutput(transcription)
+            streamOutput(rawTranscription)
+            if transcription != rawTranscription {
+                debugLog("Spoken punctuation formatted: \(transcription)")
+                streamOutput("\n--- Punctuation formatted ---")
+                streamOutput(transcription)
+            }
             systemAudioMuter.restore()
 
             // Check for empty transcription
@@ -684,21 +914,8 @@ class AppState: ObservableObject {
                 throw WhisperError.emptyRecording
             }
 
-            // Step 2: Enhance (if enabled)
-            let finalText: String
-            if settings.enhancementEnabled {
-                debugLog("Starting enhancement...")
-                streamOutput("\n--- Correcting errors... ---")
-                processingProgress = 0.75
-                finalText = try await enhancementService.enhance(text: transcription)
-                debugLog("Enhanced result: \(finalText)")
-                streamOutput("\n--- Corrected text ---")
-                streamOutput(finalText)
-                processingProgress = 0.9
-            } else {
-                finalText = transcription
-                processingProgress = 0.9
-            }
+            // Step 2: Correct and optionally translate according to the hotkey mode.
+            let finalText = try await prepareFinalText(from: transcription, mode: mode)
 
             // Step 3: Insert at cursor (or preview if enabled)
             try Task.checkCancellation()
@@ -710,6 +927,7 @@ class AppState: ObservableObject {
                 partialTranscription = finalText
                 processingProgress = 1.0
                 isProcessing = false
+                recordingMode = nil
                 // Don't clear partialTranscription - user needs to see it
                 lastError = nil
                 lastNotice = nil
@@ -729,6 +947,7 @@ class AppState: ObservableObject {
 
                 // Cleanup
                 isProcessing = false
+                recordingMode = nil
                 processingStage = ""
                 processingProgress = 0.0
                 partialTranscription = ""
@@ -759,6 +978,7 @@ class AppState: ObservableObject {
                 lastError = error.localizedDescription
             }
             isProcessing = false
+            recordingMode = nil
             processingStage = ""
             processingProgress = 0.0
         }
@@ -767,6 +987,36 @@ class AppState: ObservableObject {
         audioRecorder.cleanupRecording(at: audioURL)
         transcriptionChunkInfo = ""
         debugLog("Processing complete")
+    }
+
+    private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {
+        if mode == .translateToEnglish {
+            debugLog("Starting one-pass correction and English translation...")
+            processingStage = "Enhancing and translating..."
+            processingProgress = 0.75
+            streamOutput("\n--- Enhancing and translating to English... ---")
+            let finalText = try await enhancementService.translateToEnglish(text: transcription)
+            debugLog("English result: \(finalText)")
+            streamOutput("\n--- English result ---")
+            streamOutput(finalText)
+            processingProgress = 0.9
+            return finalText
+        }
+
+        var finalText = transcription
+        if settings.enhancementEnabled {
+            debugLog("Starting enhancement...")
+            processingStage = "Enhancing..."
+            processingProgress = 0.75
+            streamOutput("\n--- Enhancing text... ---")
+            finalText = try await enhancementService.enhance(text: finalText)
+            debugLog("Enhanced result: \(finalText)")
+            streamOutput("\n--- Enhanced text ---")
+            streamOutput(finalText)
+        }
+
+        processingProgress = 0.9
+        return finalText
     }
 
     func cancelRecording() {
@@ -784,6 +1034,14 @@ class AppState: ObservableObject {
         }
         isRecording = false
         recordingStartTime = nil
+        recordingMode = nil
+        isStartingPushToTalk = false
+        pushToTalkReleasePending = false
+        isStopRequested = false
+        sharedShortcutHoldTask?.cancel()
+        sharedShortcutHoldTask = nil
+        sharedShortcutStartedRecording = false
+        sharedShortcutStopsToggle = false
         partialTranscription = ""
         systemAudioMuter.restore()
     }
@@ -802,6 +1060,14 @@ class AppState: ObservableObject {
             Task { await service.disconnect() }
         }
         isProcessing = false
+        recordingMode = nil
+        isStartingPushToTalk = false
+        pushToTalkReleasePending = false
+        isStopRequested = false
+        sharedShortcutHoldTask?.cancel()
+        sharedShortcutHoldTask = nil
+        sharedShortcutStartedRecording = false
+        sharedShortcutStopsToggle = false
         processingStage = ""
         processingProgress = 0.0
         partialTranscription = ""

@@ -669,7 +669,7 @@ struct MainView: View {
             SettingsCard {
                 ShortcutRecorderRow(
                     name: "Push-to-talk",
-                    description: "Hold to record, release to transcribe",
+                    description: "Hold to record, release to translate into English",
                     currentKeyCode: settings.pushToTalkKeyCode,
                     currentModifiers: settings.pushToTalkModifiers,
                     defaultKeyCode: Settings.defaultPushToTalkKeyCode,
@@ -686,7 +686,7 @@ struct MainView: View {
 
                 ShortcutRecorderRow(
                     name: "Toggle mode",
-                    description: "Press to start/stop recording",
+                    description: "Press to start/stop and transcribe in the original language",
                     currentKeyCode: settings.toggleModeKeyCode,
                     currentModifiers: settings.toggleModeModifiers,
                     defaultKeyCode: Settings.defaultToggleModeKeyCode,
@@ -698,6 +698,23 @@ struct MainView: View {
                         hotkeyManager.rebindHotkeys()
                     }
                 )
+            }
+
+            if settings.pushToTalkKeyCode == settings.toggleModeKeyCode
+                && settings.pushToTalkModifiers == settings.toggleModeModifiers {
+                SettingsCard {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "hand.tap")
+                            .foregroundStyle(Theme.brand)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Shared shortcut mode")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Tap to start or stop normal transcription. Hold to translate to English, then release to insert.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                }
             }
         }
     }

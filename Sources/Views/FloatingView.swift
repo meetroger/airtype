@@ -300,7 +300,7 @@ struct FloatingView: View {
                     .foregroundStyle(.orange)
                     .padding(.top, 8)
                 } else {
-                    Text("Release to transcribe")
+                    Text(appState.recordingMode?.recordingHint ?? "Recording")
                         .font(.system(size: 12))
                         .foregroundStyle(secondaryLabelColor)
                         .padding(.top, 8)
