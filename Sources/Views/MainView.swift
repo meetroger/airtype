@@ -19,6 +19,24 @@ enum Theme {
 
 // MARK: - Main View
 
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case voice = "Voice"
+    case ai = "AI"
+    case window = "Window"
+    case shortcuts = "Shortcuts"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .voice: return "mic.fill"
+        case .ai: return "wand.and.stars"
+        case .window: return "macwindow"
+        case .shortcuts: return "keyboard"
+        }
+    }
+}
+
 struct MainView: View {
     @ObservedObject var settings: Settings
     @ObservedObject var hotkeyManager: HotkeyManager
@@ -31,27 +49,26 @@ struct MainView: View {
     @State private var isLoadingCustomModels = false
     @State private var isEditingEnhancementPrompt = false
     @State private var enhancementPromptDraft = ""
+    @State private var selectedSettingsTab: SettingsTab = .voice
 
     var body: some View {
         VStack(spacing: 0) {
             dashboardHeader
+            Divider().overlay(Theme.border)
+            settingsTabPicker
             Divider().overlay(Theme.border)
             ScrollView {
                 VStack(spacing: 16) {
                     if updateChecker.updateAvailable {
                         updateBanner
                     }
-                    if !hasAccessibility {
+                    if selectedSettingsTab == .voice && !hasAccessibility {
                         accessibilityBanner
                     }
                     if let error = settings.configurationError {
                         statusBanner(message: error)
                     }
-                    voiceInputSection
-                    enhancementSection
-                    floatingWindowSection
-                    shortcutsSection
-                    permissionsSection
+                    selectedSettingsContent
                 }
                 .padding(24)
             }
@@ -69,6 +86,35 @@ struct MainView: View {
                 },
                 onCancel: { isEditingEnhancementPrompt = false }
             )
+        }
+    }
+
+    private var settingsTabPicker: some View {
+        Picker("Settings category", selection: $selectedSettingsTab) {
+            ForEach(SettingsTab.allCases) { tab in
+                Label(tab.rawValue, systemImage: tab.icon)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.large)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var selectedSettingsContent: some View {
+        switch selectedSettingsTab {
+        case .voice:
+            voiceInputSection
+            permissionsSection
+        case .ai:
+            enhancementSection
+        case .window:
+            floatingWindowSection
+        case .shortcuts:
+            shortcutsSection
         }
     }
 
