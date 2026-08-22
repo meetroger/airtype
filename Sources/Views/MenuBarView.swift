@@ -233,6 +233,7 @@ struct MenuBarView: View {
         }
         .frame(width: 260)
         .fixedSize(horizontal: false, vertical: true)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: - Computed Properties
