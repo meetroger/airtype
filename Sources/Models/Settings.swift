@@ -84,6 +84,26 @@ enum LocalMLXComputeMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum TranslationTargetLanguage: String, CaseIterable, Identifiable {
+    case english = "English"
+    case simplifiedChinese = "Chinese (Simplified)"
+    case traditionalChinese = "Chinese (Traditional)"
+    case japanese = "Japanese"
+    case korean = "Korean"
+    case spanish = "Spanish"
+    case french = "French"
+    case german = "German"
+    case italian = "Italian"
+    case portuguese = "Portuguese"
+    case russian = "Russian"
+    case arabic = "Arabic"
+    case hindi = "Hindi"
+    case vietnamese = "Vietnamese"
+    case thai = "Thai"
+
+    var id: String { rawValue }
+}
+
 // MARK: - Enhancement Provider (Multiple OpenAI-compatible providers)
 
 enum EnhancementProvider: String, CaseIterable, Identifiable {
@@ -369,6 +389,7 @@ class Settings: ObservableObject {
 
         // Keyboard shortcuts
         static let translateOnLongPress = "translate_on_long_press"
+        static let translationTargetLanguage = "translation_target_language"
         static let pushToTalkKeyCode = "push_to_talk_key_code"
         static let pushToTalkModifiers = "push_to_talk_modifiers"
         static let toggleModeKeyCode = "toggle_mode_key_code"
@@ -511,6 +532,10 @@ class Settings: ObservableObject {
 
     @Published var translateOnLongPress: Bool {
         didSet { defaults.set(translateOnLongPress, forKey: Keys.translateOnLongPress) }
+    }
+
+    @Published var translationTargetLanguage: TranslationTargetLanguage {
+        didSet { defaults.set(translationTargetLanguage.rawValue, forKey: Keys.translationTargetLanguage) }
     }
 
     @Published var pushToTalkKeyCode: UInt32 {
@@ -801,6 +826,8 @@ class Settings: ObservableObject {
 
         // Keyboard shortcut settings
         self.translateOnLongPress = defaults.object(forKey: Keys.translateOnLongPress) as? Bool ?? false
+        let targetLanguageRaw = defaults.string(forKey: Keys.translationTargetLanguage) ?? TranslationTargetLanguage.english.rawValue
+        self.translationTargetLanguage = TranslationTargetLanguage(rawValue: targetLanguageRaw) ?? .english
         if let val = defaults.object(forKey: Keys.pushToTalkKeyCode) as? Int {
             self.pushToTalkKeyCode = UInt32(val)
         } else {

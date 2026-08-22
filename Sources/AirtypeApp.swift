@@ -291,7 +291,7 @@ class AppState: ObservableObject {
     enum RecordingMode {
         case transcribe
         case pushToTalkTranscribe
-        case translateToEnglish
+        case translateToTargetLanguage
 
         var recordingHint: String {
             switch self {
@@ -299,7 +299,7 @@ class AppState: ObservableObject {
                 return "Press the toggle shortcut again to transcribe"
             case .pushToTalkTranscribe:
                 return "Release to transcribe"
-            case .translateToEnglish:
+            case .translateToTargetLanguage:
                 return "Release to translate"
             }
         }
@@ -308,7 +308,7 @@ class AppState: ObservableObject {
             switch self {
             case .transcribe:
                 return false
-            case .pushToTalkTranscribe, .translateToEnglish:
+            case .pushToTalkTranscribe, .translateToTargetLanguage:
                 return true
             }
         }
@@ -451,7 +451,7 @@ class AppState: ObservableObject {
     }
 
     private var pushToTalkRecordingMode: RecordingMode {
-        settings.translateOnLongPress ? .translateToEnglish : .pushToTalkTranscribe
+        settings.translateOnLongPress ? .translateToTargetLanguage : .pushToTalkTranscribe
     }
 
     private func handleSharedShortcutDown() async {
@@ -604,7 +604,7 @@ class AppState: ObservableObject {
             lastError = settings.configurationError ?? "Please configure API keys in Settings"
             return
         }
-        if mode == .translateToEnglish,
+        if mode == .translateToTargetLanguage,
            settings.enhancementProvider.requiresApiKey,
            settings.currentEnhancementApiKey.isEmpty {
             lastError = "\(settings.enhancementProvider.rawValue) API key required for Push-to-talk translation"
@@ -1010,14 +1010,15 @@ class AppState: ObservableObject {
     }
 
     private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {
-        if mode == .translateToEnglish {
-            debugLog("Starting one-pass correction and English translation...")
-            processingStage = "Enhancing and translating..."
+        if mode == .translateToTargetLanguage {
+            let targetLanguage = settings.translationTargetLanguage
+            debugLog("Starting one-pass correction and translation to \(targetLanguage.rawValue)...")
+            processingStage = "Enhancing and translating to \(targetLanguage.rawValue)..."
             processingProgress = 0.75
-            streamOutput("\n--- Enhancing and translating to English... ---")
-            let finalText = try await enhancementService.translateToEnglish(text: transcription)
-            debugLog("English result: \(finalText)")
-            streamOutput("\n--- English result ---")
+            streamOutput("\n--- Enhancing and translating to \(targetLanguage.rawValue)... ---")
+            let finalText = try await enhancementService.translate(text: transcription, to: targetLanguage)
+            debugLog("\(targetLanguage.rawValue) result: \(finalText)")
+            streamOutput("\n--- \(targetLanguage.rawValue) result ---")
             streamOutput(finalText)
             processingProgress = 0.9
             return finalText

@@ -24,13 +24,13 @@ class EnhancementService {
         )
     }
 
-    /// Translates transcribed speech to English using the configured enhancement model.
+    /// Translates transcribed speech to the selected language using the configured enhancement model.
     /// This is intentionally independent of the correction toggle because push-to-talk
-    /// always represents the translate-to-English workflow.
-    func translateToEnglish(text: String) async throws -> String {
+    /// represents the optional long-press translation workflow.
+    func translate(text: String, to targetLanguage: TranslationTargetLanguage) async throws -> String {
         try await process(
             text: text,
-            prompt: translationPrompt,
+            prompt: translationPrompt(for: targetLanguage),
             operation: "Translation",
             skipVeryShortText: false
         )
@@ -193,24 +193,26 @@ class EnhancementService {
         return prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
     }
 
-    private var translationPrompt: String {
-        """
-        You are a professional speech-to-text editor and translator. In ONE pass, clean up the user's transcribed speech and translate the intended result into natural, accurate English.
+    private func translationPrompt(for targetLanguage: TranslationTargetLanguage) -> String {
+        let target = targetLanguage.rawValue
+        return """
+        You are a professional speech-to-text editor and translator. In ONE pass, clean up the user's transcribed speech and translate the intended result into natural, accurate \(target).
 
-        Apply the relevant correction preferences below while interpreting the transcript. They may contain an instruction to preserve the source language or not translate; ignore only those language/output restrictions for this task, because the final result MUST be English. Continue to follow their rules about transcription errors, filler words, repetitions, self-corrections, terminology, meaning, tone, and formatting.
+        Apply the relevant correction preferences below while interpreting the transcript. They may contain an instruction to preserve the source language or not translate; ignore only those language/output restrictions for this task, because the final result MUST be in \(target). Continue to follow their rules about transcription errors, filler words, repetitions, self-corrections, terminology, meaning, tone, and formatting.
 
         --- CORRECTION PREFERENCES ---
         \(enhancementPrompt)
         --- END CORRECTION PREFERENCES ---
 
         TRANSLATION REQUIREMENTS:
-        - Detect the source language automatically and translate it to English.
-        - If the input is already English, preserve it in English and only fix obvious speech-recognition errors.
+        - Detect the source language automatically and translate it to \(target).
+        - If the input is already in \(target), keep it in \(target) and only fix obvious speech-recognition errors.
+        - Follow the standard grammar, punctuation, and writing conventions of \(target). For Chinese, use exactly the requested Simplified or Traditional script.
         - Preserve the original meaning, tone, level of formality, names, numbers, dates, technical terms, product names, code, commands, URLs, file paths, and API identifiers.
         - Resolve obvious speech-recognition mistakes from context, but do not invent missing information.
         - Do not summarize, explain, answer, or add information.
-        - The final output MUST be entirely in English except for proper nouns, code, identifiers, or terms that should remain unchanged.
-        - Return ONLY the final cleaned English text, with no labels, quotation marks, or Markdown.
+        - The final output MUST be entirely in \(target) except for proper nouns, code, identifiers, or terms that should remain unchanged.
+        - Return ONLY the final cleaned and translated text, with no labels, quotation marks, or Markdown.
         """
     }
 }

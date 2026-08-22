@@ -672,19 +672,33 @@ struct MainView: View {
                         Text("Translate on long press")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("When enabled, hold and release to translate into English; otherwise, hold and release to transcribe")
+                        Text("When enabled, hold and release to translate into the selected language; otherwise, hold and release to transcribe")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .toggleStyle(.switch)
+
+                if settings.translateOnLongPress {
+                    SettingsCardDivider()
+
+                    SettingsCardRow(label: "Target language") {
+                        Picker("", selection: $settings.translationTargetLanguage) {
+                            ForEach(TranslationTargetLanguage.allCases) { language in
+                                Text(language.rawValue).tag(language)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 190)
+                    }
+                }
             }
 
             SettingsCard {
                 ShortcutRecorderRow(
                     name: "Push-to-talk",
                     description: settings.translateOnLongPress
-                        ? "Hold to record, release to translate into English"
+                        ? "Hold to record, release to translate into \(settings.translationTargetLanguage.rawValue)"
                         : "Hold to record, release to transcribe in the original language",
                     currentKeyCode: settings.pushToTalkKeyCode,
                     currentModifiers: settings.pushToTalkModifiers,
@@ -726,7 +740,7 @@ struct MainView: View {
                             Text("Shared shortcut mode")
                                 .font(.system(size: 12, weight: .medium))
                             Text(settings.translateOnLongPress
-                                ? "Tap to start or stop normal transcription. Hold to translate to English, then release to insert."
+                                ? "Tap to start or stop normal transcription. Hold to translate to \(settings.translationTargetLanguage.rawValue), then release to insert."
                                 : "Tap to start or stop normal transcription. Hold to record, then release to transcribe and insert.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Theme.textSecondary)
