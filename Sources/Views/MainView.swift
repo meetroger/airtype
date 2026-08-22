@@ -606,6 +606,26 @@ struct MainView: View {
                     }
                 }
                 .toggleStyle(.switch)
+
+                SettingsCardDivider()
+
+                SettingsCardRow(label: "Correction Prompt") {
+                    HStack(spacing: 8) {
+                        if !settings.enhancementEnabled {
+                            Text("Enable enhancement to edit")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+
+                        Button("Edit Prompt…") {
+                            enhancementPromptDraft = settings.enhancementPrompt
+                            isEditingEnhancementPrompt = true
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!settings.enhancementEnabled)
+                    }
+                }
             }
 
             if settings.enhancementEnabled || settings.translateOnLongPress {
@@ -699,19 +719,6 @@ struct MainView: View {
                                         .foregroundStyle(Theme.textSecondary)
                                 }
                             }
-                        }
-                    }
-
-                    if settings.enhancementEnabled {
-                        SettingsCardDivider()
-
-                        SettingsCardRow(label: "Correction Prompt") {
-                            Button("Edit Prompt…") {
-                                enhancementPromptDraft = settings.enhancementPrompt
-                                isEditingEnhancementPrompt = true
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
                         }
                     }
 
