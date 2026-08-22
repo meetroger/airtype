@@ -253,13 +253,17 @@ struct MenuBarIcon: View {
     var body: some View {
         if #available(macOS 14.0, *) {
             Image(systemName: iconName)
-                .font(.system(size: 16, weight: .bold))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 19, height: 19)
                 .foregroundStyle(iconColor)
                 .symbolEffect(.pulse, isActive: isRecording)
         } else {
             // Fallback for macOS 13
             Image(systemName: iconName)
-                .font(.system(size: 16, weight: .bold))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 19, height: 19)
                 .foregroundStyle(iconColor)
         }
     }
