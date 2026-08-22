@@ -29,6 +29,37 @@ class AudioRecorder: NSObject, ObservableObject {
     private let maxFileSizeBytes: Int64 = 24 * 1024 * 1024  // 24MB (leave buffer below 25MB limit)
     private let levelUpdateInterval: TimeInterval = 0.05    // 50ms for smooth animation
 
+    nonisolated static var recordingsDirectoryURL: URL {
+        let applicationSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return applicationSupport
+            .appendingPathComponent("Airtype", isDirectory: true)
+            .appendingPathComponent("Recordings", isDirectory: true)
+    }
+
+    @discardableResult
+    nonisolated static func ensureRecordingsDirectory() throws -> URL {
+        let directoryURL = recordingsDirectoryURL
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        return directoryURL
+    }
+
+    nonisolated static func makeRecordingURL(fileExtension: String) throws -> URL {
+        let directoryURL = try ensureRecordingsDirectory()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let timestamp = formatter.string(from: Date())
+        let uniqueSuffix = UUID().uuidString.prefix(6)
+        return directoryURL.appendingPathComponent(
+            "Airtype_\(timestamp)_\(uniqueSuffix).\(fileExtension)"
+        )
+    }
+
     override init() {
         super.init()
         checkPermission()
@@ -80,9 +111,12 @@ class AudioRecorder: NSObject, ObservableObject {
             throw RecordingError.noPermission
         }
 
-        let tempDir = FileManager.default.temporaryDirectory
-        let fileName = "airtype_recording_\(Date().timeIntervalSince1970).m4a"
-        let url = tempDir.appendingPathComponent(fileName)
+        let url: URL
+        do {
+            url = try Self.makeRecordingURL(fileExtension: "m4a")
+        } catch {
+            throw RecordingError.setupFailed("Could not create the recordings folder: \(error.localizedDescription)")
+        }
 
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
@@ -111,6 +145,7 @@ class AudioRecorder: NSObject, ObservableObject {
 
             return url
         } catch {
+            try? FileManager.default.removeItem(at: url)
             throw RecordingError.setupFailed(error.localizedDescription)
         }
     }
@@ -227,10 +262,6 @@ class AudioRecorder: NSObject, ObservableObject {
         recordingDuration = 0.0
     }
 
-    // MARK: - Cleanup
-    func cleanupRecording(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
-    }
 }
 
 enum RecordingError: LocalizedError {

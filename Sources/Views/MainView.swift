@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import HotKey
 import ServiceManagement
@@ -354,7 +355,41 @@ struct MainView: View {
                     }
                 }
                 .toggleStyle(.switch)
+
+                SettingsCardDivider()
+
+                SettingsCardRow(label: "Recording History") {
+                    HStack(spacing: 10) {
+                        Text("Completed recordings are saved locally")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Button("Open in Finder") {
+                            openRecordingsFolder()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
             }
+        }
+    }
+
+    private func openRecordingsFolder() {
+        do {
+            let directoryURL = try AudioRecorder.ensureRecordingsDirectory()
+            guard NSWorkspace.shared.selectFile(
+                nil,
+                inFileViewerRootedAtPath: directoryURL.path
+            ) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn’t Open Recordings Folder"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
         }
     }
 

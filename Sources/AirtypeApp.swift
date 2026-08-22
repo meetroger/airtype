@@ -963,7 +963,6 @@ class AppState: ObservableObject {
         if fileSize < 1000 {  // Less than 1KB is likely empty
             debugLog("Recording too short, skipping")
             lastNotice = "Recording too short. Please speak for longer."
-            audioRecorder.cleanupRecording(at: audioURL)
             isRecording = false
             recordingStartTime = nil
             recordingMode = nil
@@ -974,7 +973,6 @@ class AppState: ObservableObject {
         if audioRecorder.recordingWasSilent {
             debugLog("Recording was silent (max level: \(audioRecorder.maxLevelDuringRecording)), skipping API call")
             lastNotice = "No speech detected. Check that the correct microphone is selected in System Settings → Sound → Input."
-            audioRecorder.cleanupRecording(at: audioURL)
             isRecording = false
             recordingStartTime = nil
             recordingMode = nil
@@ -1123,8 +1121,6 @@ class AppState: ObservableObject {
             processingProgress = 0.0
         }
 
-        // Cleanup audio file
-        audioRecorder.cleanupRecording(at: audioURL)
         transcriptionChunkInfo = ""
         debugLog("Processing complete")
     }
@@ -1164,7 +1160,7 @@ class AppState: ObservableObject {
 
     func cancelRecording() {
         if shouldUseStreaming {
-            streamingCapture?.stop()
+            streamingCapture?.stop(discard: true)
             streamingCapture = nil
             streamingEventTask?.cancel()
             streamingEventTask = nil
@@ -1194,7 +1190,7 @@ class AppState: ObservableObject {
         processingTask?.cancel()
         processingTask = nil
         // Tear down any lingering streaming state
-        streamingCapture?.stop()
+        streamingCapture?.stop(discard: true)
         streamingCapture = nil
         streamingEventTask?.cancel()
         streamingEventTask = nil
