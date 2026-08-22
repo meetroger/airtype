@@ -368,6 +368,7 @@ class Settings: ObservableObject {
         static let enhancementBaseURL_custom = "enhancement_base_url_custom"
 
         // Keyboard shortcuts
+        static let translateOnLongPress = "translate_on_long_press"
         static let pushToTalkKeyCode = "push_to_talk_key_code"
         static let pushToTalkModifiers = "push_to_talk_modifiers"
         static let toggleModeKeyCode = "toggle_mode_key_code"
@@ -507,6 +508,10 @@ class Settings: ObservableObject {
     static let defaultPushToTalkModifiers = NSEvent.ModifierFlags.option.carbonFlags
     static let defaultToggleModeKeyCode = UInt32(kVK_Space)
     static let defaultToggleModeModifiers = NSEvent.ModifierFlags([.option, .shift]).carbonFlags
+
+    @Published var translateOnLongPress: Bool {
+        didSet { defaults.set(translateOnLongPress, forKey: Keys.translateOnLongPress) }
+    }
 
     @Published var pushToTalkKeyCode: UInt32 {
         didSet { defaults.set(Int(pushToTalkKeyCode), forKey: Keys.pushToTalkKeyCode) }
@@ -795,6 +800,7 @@ class Settings: ObservableObject {
         self.enhancementBaseURLs = baseURLs
 
         // Keyboard shortcut settings
+        self.translateOnLongPress = defaults.object(forKey: Keys.translateOnLongPress) as? Bool ?? false
         if let val = defaults.object(forKey: Keys.pushToTalkKeyCode) as? Int {
             self.pushToTalkKeyCode = UInt32(val)
         } else {

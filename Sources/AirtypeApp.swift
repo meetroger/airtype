@@ -290,14 +290,26 @@ struct MenuBarIcon: View {
 class AppState: ObservableObject {
     enum RecordingMode {
         case transcribe
+        case pushToTalkTranscribe
         case translateToEnglish
 
         var recordingHint: String {
             switch self {
             case .transcribe:
                 return "Press the toggle shortcut again to transcribe"
+            case .pushToTalkTranscribe:
+                return "Release to transcribe"
             case .translateToEnglish:
                 return "Release to translate"
+            }
+        }
+
+        var isPushToTalk: Bool {
+            switch self {
+            case .transcribe:
+                return false
+            case .pushToTalkTranscribe, .translateToEnglish:
+                return true
             }
         }
     }
@@ -388,9 +400,10 @@ class AppState: ObservableObject {
                 if self.isProcessing {
                     self.cancelProcessing()
                 } else {
+                    let mode = self.pushToTalkRecordingMode
                     self.pushToTalkReleasePending = false
                     self.isStartingPushToTalk = true
-                    await self.startRecording(mode: .translateToEnglish)
+                    await self.startRecording(mode: mode)
                     self.isStartingPushToTalk = false
 
                     // A quick release can arrive while microphone permission or
@@ -398,7 +411,7 @@ class AppState: ObservableObject {
                     // completes instead of requiring a second key press.
                     if self.pushToTalkReleasePending || !self.hotkeyManager.isPushToTalkPressed {
                         self.pushToTalkReleasePending = false
-                        self.requestStop(for: .translateToEnglish)
+                        self.requestStop(for: mode)
                     }
                 }
             }
@@ -417,7 +430,8 @@ class AppState: ObservableObject {
                     self.pushToTalkReleasePending = true
                     return
                 }
-                self.requestStop(for: .translateToEnglish)
+                guard let mode = self.recordingMode, mode.isPushToTalk else { return }
+                self.requestStop(for: mode)
             }
         }
 
@@ -434,6 +448,10 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    private var pushToTalkRecordingMode: RecordingMode {
+        settings.translateOnLongPress ? .translateToEnglish : .pushToTalkTranscribe
     }
 
     private func handleSharedShortcutDown() async {
@@ -460,7 +478,7 @@ class AppState: ObservableObject {
 
         // Recording begins immediately as normal transcription so the first
         // syllable is never lost. Holding past the threshold promotes the same
-        // recording to the one-pass English translation workflow.
+        // recording to push-to-talk, with optional one-pass English translation.
         sharedShortcutHoldTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: self?.sharedShortcutHoldDelay ?? 350_000_000)
@@ -471,16 +489,18 @@ class AppState: ObservableObject {
                   self.hotkeyManager.isPushToTalkPressed,
                   self.sharedShortcutStartedRecording,
                   self.recordingMode == .transcribe else { return }
-            self.recordingMode = .translateToEnglish
-            debugLog("Shared shortcut promoted to Push-to-talk translation")
+            self.recordingMode = self.pushToTalkRecordingMode
+            debugLog("Shared shortcut promoted to Push-to-talk mode: \(String(describing: self.recordingMode))")
         }
 
         await startRecording(mode: .transcribe)
         isStartingPushToTalk = false
 
-        if pushToTalkReleasePending && recordingMode == .translateToEnglish {
+        if pushToTalkReleasePending,
+           let mode = recordingMode,
+           mode.isPushToTalk {
             pushToTalkReleasePending = false
-            requestStop(for: .translateToEnglish)
+            requestStop(for: mode)
         }
     }
 
@@ -492,11 +512,11 @@ class AppState: ObservableObject {
         if sharedShortcutStopsToggle {
             sharedShortcutStopsToggle = false
             requestStop(for: .transcribe)
-        } else if recordingMode == .translateToEnglish {
+        } else if let mode = recordingMode, mode.isPushToTalk {
             if isStartingPushToTalk {
                 pushToTalkReleasePending = true
             } else {
-                requestStop(for: .translateToEnglish)
+                requestStop(for: mode)
             }
         }
 
