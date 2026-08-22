@@ -115,27 +115,189 @@ enum SpokenPunctuationFormatter {
     }
 }
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var appState: AppState?
+    private var statusBarController: StatusBarController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let appState = AppState()
+        self.appState = appState
+        statusBarController = StatusBarController(appState: appState)
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             MainWindowController.shared.show()
         }
         return true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        statusBarController = nil
+        appState = nil
+    }
 }
 
 @main
 struct AirtypeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var appState = AppState()
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarView(appState: appState, floatingWindowManager: appState.floatingWindowManager)
-        } label: {
-            MenuBarIcon(isRecording: appState.isRecording, isProcessing: appState.isProcessing)
+        SwiftUI.Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    MainWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+    }
+}
+
+/// Owns the native status item so its artwork has an exact pixel footprint and
+/// its button action can distinguish a single click from a double click.
+@MainActor
+final class StatusBarController: NSObject {
+    private let appState: AppState
+    private let statusItem: NSStatusItem
+    private let popover = NSPopover()
+    private var cancellables = Set<AnyCancellable>()
+    private var lastStatusItemClickTime: TimeInterval = 0
+
+    init(appState: AppState) {
+        self.appState = appState
+        self.statusItem = NSStatusBar.system.statusItem(withLength: 32)
+        super.init()
+
+        configureButton()
+        configurePopover()
+        observeAppState()
+        updateIcon()
+    }
+
+    deinit {
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    private func configureButton() {
+        guard let button = statusItem.button else { return }
+        button.target = self
+        button.action = #selector(statusItemClicked(_:))
+        button.sendAction(on: .leftMouseUp)
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
+        button.toolTip = "Airtype — double-click to open Settings"
+        button.setAccessibilityLabel("Airtype")
+    }
+
+    private func configurePopover() {
+        let menuView = MenuBarView(
+            appState: appState,
+            floatingWindowManager: appState.floatingWindowManager
+        )
+        let hostingController = NSHostingController(rootView: menuView)
+        hostingController.sizingOptions = [.preferredContentSize]
+
+        popover.contentViewController = hostingController
+        popover.behavior = .transient
+        popover.animates = true
+    }
+
+    private func observeAppState() {
+        appState.$isRecording
+            .combineLatest(appState.$isProcessing)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                self?.updateIcon()
+            }
+            .store(in: &cancellables)
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let clickTime = ProcessInfo.processInfo.systemUptime
+        let isRapidSecondClick = lastStatusItemClickTime > 0
+            && clickTime - lastStatusItemClickTime <= NSEvent.doubleClickInterval
+        let isDoubleClick = (NSApp.currentEvent?.clickCount ?? 1) >= 2 || isRapidSecondClick
+        lastStatusItemClickTime = isDoubleClick ? 0 : clickTime
+
+        if isDoubleClick {
+            debugLog("Menu bar double-click: opening Settings")
+            popover.performClose(nil)
+            MainWindowController.shared.show()
+            return
+        }
+
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            showPopover(relativeTo: sender)
+        }
+    }
+
+    private func showPopover(relativeTo button: NSStatusBarButton) {
+        let fittingSize = popover.contentViewController?.view.fittingSize ?? .zero
+        if fittingSize.width > 0, fittingSize.height > 0 {
+            popover.contentSize = fittingSize
+        }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    private func updateIcon() {
+        guard let button = statusItem.button else { return }
+
+        let glyphName: String
+        let glyphPointSize: CGFloat
+        if appState.isRecording {
+            glyphName = "circle.fill"
+            glyphPointSize = 8
+            button.contentTintColor = .systemRed
+        } else if appState.isProcessing {
+            glyphName = "ellipsis"
+            glyphPointSize = 12
+            button.contentTintColor = .systemOrange
+        } else {
+            glyphName = "mic.fill"
+            glyphPointSize = 12
+            button.contentTintColor = .labelColor
+        }
+
+        button.image = Self.makeStatusImage(
+            glyphName: glyphName,
+            glyphPointSize: glyphPointSize
+        )
+    }
+
+    /// Produce a 22-point template image whose visible outer disc reaches the
+    /// canvas edges. The inner SF Symbol is punched out of that disc.
+    private static func makeStatusImage(glyphName: String, glyphPointSize: CGFloat) -> NSImage {
+        let imageSize = NSSize(width: 22, height: 22)
+        let image = NSImage(size: imageSize, flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
+
+            guard let glyph = NSImage(systemSymbolName: glyphName, accessibilityDescription: nil)?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(pointSize: glyphPointSize, weight: .black)
+                ) else {
+                return true
+            }
+
+            let glyphSize = glyph.size
+            let glyphRect = NSRect(
+                x: rect.midX - glyphSize.width / 2,
+                y: rect.midY - glyphSize.height / 2,
+                width: glyphSize.width,
+                height: glyphSize.height
+            )
+            glyph.draw(in: glyphRect, from: .zero, operation: .destinationOut, fraction: 1)
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
 
@@ -242,50 +404,6 @@ class FloatingWindowManager: ObservableObject {
         panel?.contentView = hostingView
         panel?.backgroundColor = NSColor.clear
         panel?.applyRoundedMask()
-    }
-}
-
-/// Animated menu bar icon
-struct MenuBarIcon: View {
-    let isRecording: Bool
-    let isProcessing: Bool
-
-    var body: some View {
-        if #available(macOS 14.0, *) {
-            Image(systemName: iconName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 19, height: 19)
-                .foregroundStyle(iconColor)
-                .symbolEffect(.pulse, isActive: isRecording)
-        } else {
-            // Fallback for macOS 13
-            Image(systemName: iconName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 19, height: 19)
-                .foregroundStyle(iconColor)
-        }
-    }
-
-    private var iconName: String {
-        if isRecording {
-            return "record.circle.fill"
-        } else if isProcessing {
-            return "ellipsis.circle.fill"
-        } else {
-            return "mic.circle.fill"
-        }
-    }
-
-    private var iconColor: Color {
-        if isRecording {
-            return .red
-        } else if isProcessing {
-            return .orange
-        } else {
-            return .primary
-        }
     }
 }
 

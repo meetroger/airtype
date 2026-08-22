@@ -3,7 +3,14 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var floatingWindowManager: FloatingWindowManager
+    @ObservedObject private var hotkeyManager: HotkeyManager
     @State private var isPulsing = false
+
+    init(appState: AppState, floatingWindowManager: FloatingWindowManager) {
+        self.appState = appState
+        self.floatingWindowManager = floatingWindowManager
+        self.hotkeyManager = appState.hotkeyManager
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -158,8 +165,8 @@ struct MenuBarView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 2)
 
-                shortcutRow(action: "Push-to-talk", keys: "⌥ Space")
-                shortcutRow(action: "Toggle mode", keys: "⌥⇧ Space")
+                shortcutRow(action: "Push-to-talk", keys: hotkeyManager.pushToTalkDisplay)
+                shortcutRow(action: "Toggle mode", keys: hotkeyManager.toggleModeDisplay)
             }
             .padding(.vertical, 6)
 
