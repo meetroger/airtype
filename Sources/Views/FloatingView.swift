@@ -9,6 +9,7 @@ struct FloatingView: View {
 
     @ObservedObject var appState: AppState
     @ObservedObject var audioRecorder: AudioRecorder
+    @ObservedObject private var hotkeyManager: HotkeyManager
     @StateObject private var appearanceObserver = GlassAppearanceObserver()
     @State private var isExpanded = false
     @State private var isHovering = false
@@ -16,6 +17,7 @@ struct FloatingView: View {
     init(appState: AppState) {
         self.appState = appState
         self.audioRecorder = appState.audioRecorder
+        self.hotkeyManager = appState.hotkeyManager
     }
 
     // Fixed colors - white text on tinted glass
@@ -390,13 +392,23 @@ struct FloatingView: View {
                 .font(.system(size: 32))
                 .foregroundStyle(secondaryLabelColor)
 
-            Text("Hold \u{2325} Space to record")
-                .font(.system(size: 13))
-                .foregroundStyle(secondaryLabelColor)
+            if hotkeyManager.usesSharedShortcut {
+                Text("Tap \(hotkeyManager.toggleModeDisplay) to toggle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(secondaryLabelColor)
 
-            Text("or \u{2325}\u{21E7} Space to toggle")
-                .font(.system(size: 11))
-                .foregroundStyle(tertiaryLabelColor)
+                Text("Hold \(hotkeyManager.pushToTalkDisplay) for push-to-talk")
+                    .font(.system(size: 11))
+                    .foregroundStyle(tertiaryLabelColor)
+            } else {
+                Text("Hold \(hotkeyManager.pushToTalkDisplay) to record")
+                    .font(.system(size: 13))
+                    .foregroundStyle(secondaryLabelColor)
+
+                Text("or \(hotkeyManager.toggleModeDisplay) to toggle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(tertiaryLabelColor)
+            }
         }
         .padding(.vertical, 30)
     }
@@ -504,7 +516,9 @@ struct FloatingView: View {
         } else if appState.lastError != nil || appState.lastNotice != nil {
             return "Tap to see details"
         } else {
-            return "Hold \u{2325} Space"
+            return hotkeyManager.usesSharedShortcut
+                ? "Tap or hold \(hotkeyManager.pushToTalkDisplay)"
+                : "Hold \(hotkeyManager.pushToTalkDisplay)"
         }
     }
 

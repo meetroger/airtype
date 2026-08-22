@@ -554,15 +554,27 @@ class Settings: ObservableObject {
         didSet { defaults.set(Int(toggleModeModifiers), forKey: Keys.toggleModeModifiers) }
     }
 
-    /// Format a key combo as a human-readable string (e.g. "⌥ Space")
+    /// Format a key combo as a readable sequence (e.g. "⌥ + ⇧ + Space").
     static func shortcutDisplayString(keyCode: UInt32, modifiers: UInt32) -> String {
         let flags = NSEvent.ModifierFlags(carbonFlags: modifiers)
-        let modString = flags.description
-        let keyString = Key(carbonKeyCode: keyCode)?.description ?? "?"
-        if modString.isEmpty {
-            return keyString
+        var components: [String] = []
+
+        if flags.contains(.control) {
+            components.append("⌃")
         }
-        return "\(modString)\(keyString)"
+        if flags.contains(.option) {
+            components.append("⌥")
+        }
+        if flags.contains(.shift) {
+            components.append("⇧")
+        }
+        if flags.contains(.command) {
+            components.append("⌘")
+        }
+
+        let keyString = Key(carbonKeyCode: keyCode)?.description ?? "?"
+        components.append(keyString)
+        return components.joined(separator: " + ")
     }
 
     // MARK: - Available Models

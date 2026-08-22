@@ -947,7 +947,7 @@ struct MainView: View {
                             .foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
-                    Button("Open Settings") {
+                    Button(hasAccessibility ? "Open Settings" : "Grant Access") {
                         openAccessibilitySettings()
                     }
                     .buttonStyle(.bordered)
@@ -985,6 +985,15 @@ struct MainView: View {
     }
 
     private func openAccessibilitySettings() {
+        if !AXIsProcessTrusted() {
+            // Ask TCC for trust before opening System Settings. Merely opening
+            // the pane does not initiate an Accessibility permission request.
+            let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            let options = [promptKey: true] as CFDictionary
+            let trusted = AXIsProcessTrustedWithOptions(options)
+            debugLog("Accessibility permission request returned: \(trusted)")
+        }
+
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
