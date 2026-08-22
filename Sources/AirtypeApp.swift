@@ -1016,10 +1016,12 @@ class AppState: ObservableObject {
     private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {
         if mode == .translateToTargetLanguage {
             let targetLanguage = settings.translationTargetLanguage
-            debugLog("Starting one-pass correction and translation to \(targetLanguage.rawValue)...")
-            processingStage = "Enhancing and translating to \(targetLanguage.rawValue)..."
+            let usesEnhancement = settings.enhancementEnabled
+            let operation = usesEnhancement ? "Enhancing and translating" : "Translating"
+            debugLog("Starting \(usesEnhancement ? "one-pass enhancement and translation" : "direct translation") to \(targetLanguage.rawValue)...")
+            processingStage = "\(operation) to \(targetLanguage.rawValue)..."
             processingProgress = 0.75
-            streamOutput("\n--- Enhancing and translating to \(targetLanguage.rawValue)... ---")
+            streamOutput("\n--- \(operation) to \(targetLanguage.rawValue)... ---")
             let finalText = try await enhancementService.translate(text: transcription, to: targetLanguage)
             debugLog("\(targetLanguage.rawValue) result: \(finalText)")
             streamOutput("\n--- \(targetLanguage.rawValue) result ---")

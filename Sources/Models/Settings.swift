@@ -744,8 +744,10 @@ class Settings: ObservableObject {
             }
         }
 
-        if enhancementEnabled && enhancementProvider.requiresApiKey && currentEnhancementApiKey.isEmpty {
-            return "\(enhancementProvider.rawValue) API key required for enhancement model"
+        if (enhancementEnabled || translateOnLongPress)
+            && enhancementProvider.requiresApiKey
+            && currentEnhancementApiKey.isEmpty {
+            return "\(enhancementProvider.rawValue) API key required for AI processing"
         }
 
         return nil

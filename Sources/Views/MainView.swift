@@ -496,7 +496,7 @@ struct MainView: View {
     // MARK: - Enhancement
 
     private var enhancementSection: some View {
-        SettingsSection(title: "Enhancement", icon: "wand.and.stars") {
+        SettingsSection(title: "AI Processing", icon: "wand.and.stars") {
             SettingsCard {
                 Toggle(isOn: $settings.enhancementEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -511,7 +511,7 @@ struct MainView: View {
                 .toggleStyle(.switch)
             }
 
-            if settings.enhancementEnabled {
+            if settings.enhancementEnabled || settings.translateOnLongPress {
                 SettingsCard {
                     SettingsCardRow(label: "Provider") {
                         Picker("", selection: $settings.enhancementProvider) {
@@ -605,15 +605,17 @@ struct MainView: View {
                         }
                     }
 
-                    SettingsCardDivider()
+                    if settings.enhancementEnabled {
+                        SettingsCardDivider()
 
-                    SettingsCardRow(label: "Correction Prompt") {
-                        Button("Edit Prompt…") {
-                            enhancementPromptDraft = settings.enhancementPrompt
-                            isEditingEnhancementPrompt = true
+                        SettingsCardRow(label: "Correction Prompt") {
+                            Button("Edit Prompt…") {
+                                enhancementPromptDraft = settings.enhancementPrompt
+                                isEditingEnhancementPrompt = true
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                     }
 
                     SettingsCardDivider()

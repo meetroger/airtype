@@ -24,9 +24,8 @@ class EnhancementService {
         )
     }
 
-    /// Translates transcribed speech to the selected language using the configured enhancement model.
-    /// This is intentionally independent of the correction toggle because push-to-talk
-    /// represents the optional long-press translation workflow.
+    /// Translates transcribed speech using the configured AI model. When enhancement
+    /// is disabled, the prompt performs direct translation without correction rules.
     func translate(text: String, to targetLanguage: TranslationTargetLanguage) async throws -> String {
         try await process(
             text: text,
@@ -195,6 +194,21 @@ class EnhancementService {
 
     private func translationPrompt(for targetLanguage: TranslationTargetLanguage) -> String {
         let target = targetLanguage.rawValue
+        guard settings.enhancementEnabled else {
+            return """
+            You are a professional translator. Translate the user's text directly into natural, accurate \(target).
+
+            TRANSLATION REQUIREMENTS:
+            - Detect the source language automatically and translate it to \(target).
+            - Treat the input as the source text exactly as provided. Do not repair suspected speech-recognition errors, remove filler words, rewrite, or otherwise enhance it before translation.
+            - If the input is already in \(target), return it unchanged.
+            - Preserve the original meaning, tone, level of formality, names, numbers, dates, technical terms, product names, code, commands, URLs, file paths, and API identifiers.
+            - Follow the standard writing system of \(target). For Chinese, use exactly the requested Simplified or Traditional script.
+            - Do not summarize, explain, answer, embellish, or add information.
+            - Return ONLY the translated text, with no labels, quotation marks, commentary, or Markdown.
+            """
+        }
+
         return """
         You are a professional speech-to-text editor and translator. In ONE pass, clean up the user's transcribed speech and translate the intended result into natural, accurate \(target).
 
