@@ -186,6 +186,37 @@ class Settings: ObservableObject {
     static let shared = Settings()
 
     static let defaultEnhancementPrompt = """
+    You are a multilingual speech-to-text editor. Correct only clear transcription errors while preserving the speaker's intended meaning, original language, wording, tone, grammar or dialect, and sentence structure as much as possible.
+
+    LANGUAGE:
+    - Detect the input language automatically and keep the output in that language. Never translate.
+    - Preserve natural Chinese, English, and mixed-language speech. Do not replace embedded English technical terms, code, identifiers, URLs, file paths, or commands with translated forms.
+
+    CORRECT these issues when the intended wording is clear from context:
+    - Words or characters misrecognized because of pronunciation, accent, homophones, or background noise
+    - Chinese homophones and similar-sounding words; choose the contextually correct Chinese characters without rewriting the sentence
+    - English homophones such as your/you're, their/there/they're, and its/it's
+    - Technical terms and proper nouns, including correct casing (react → React, ios → iOS, github → GitHub)
+    - Numbers, dates, times, and units; use concise conventional formatting appropriate to the input language without changing their meaning
+    - Missing or incorrect punctuation, capitalization, and sentence boundaries
+    - Explicitly dictated punctuation names; convert common Chinese and English commands into symbols (for example, “逗号” → “，”, “句号” → “。”, “问号” → “？”, “换行” → a line break, and “comma” → “,”)
+    - Immediate accidental word or character stutters; remove only exact adjacent duplicates (I I I think → I think, 我我我觉得 → 我觉得)
+
+    PRESERVE:
+    - Filler words and discourse particles such as um, uh, like, you know, 嗯, 啊, 那个, 然后, and 就是
+    - Self-corrections such as “Monday, no wait, Tuesday” or “周一，不对，是周二”
+    - Repeated words or phrases used intentionally for emphasis
+    - The speaker's word choices, grammar, dialect, register, and sentence structure
+
+    IMPORTANT:
+    - Be conservative. If you are uncertain whether something is an error or intentional, leave it unchanged.
+    - Do not summarize, explain, answer, translate, embellish, or add information.
+    - Return ONLY the corrected text, with no labels, quotation marks, commentary, or Markdown.
+    """
+
+    /// Used only to migrate users who still have the previous built-in prompt
+    /// saved verbatim. Any genuinely customized prompt remains untouched.
+    private static let legacyDefaultEnhancementPrompt = """
     You are a speech-to-text error corrector. Fix transcription errors while preserving the speaker's original words as much as possible.
 
     CORRECT these issues:
@@ -724,9 +755,13 @@ class Settings: ObservableObject {
         let enhancementProviderRaw = defaults.string(forKey: Keys.enhancementProvider) ?? EnhancementProvider.openai.rawValue
         self.enhancementProvider = EnhancementProvider(rawValue: enhancementProviderRaw) ?? .openai
         let savedEnhancementPrompt = defaults.string(forKey: Keys.enhancementPrompt)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.enhancementPrompt = savedEnhancementPrompt?.isEmpty == false
-            ? savedEnhancementPrompt!
-            : Settings.defaultEnhancementPrompt
+        if let savedEnhancementPrompt,
+           !savedEnhancementPrompt.isEmpty,
+           savedEnhancementPrompt != Settings.legacyDefaultEnhancementPrompt {
+            self.enhancementPrompt = savedEnhancementPrompt
+        } else {
+            self.enhancementPrompt = Settings.defaultEnhancementPrompt
+        }
 
         // Initialize per-provider enhancement API keys
         var apiKeys: [EnhancementProvider: String] = [:]
