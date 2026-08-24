@@ -481,6 +481,7 @@ class AppState: ObservableObject {
     private var sharedShortcutStartedRecording = false
     private var sharedShortcutStopsToggle = false
     private let sharedShortcutHoldDelay: UInt64 = 350_000_000
+    private let minimumRecordingDuration: TimeInterval = 2.0
 
     var menuBarIcon: String {
         if isRecording {
@@ -871,6 +872,24 @@ class AppState: ObservableObject {
         streamingCapture = nil
         audioRecorder.endCaptureMonitoring()
 
+        let recordedDuration = audioRecorder.recordingDuration
+        if recordedDuration < minimumRecordingDuration {
+            streamingEventTask?.cancel()
+            streamingEventTask = nil
+            await streamingService?.disconnect()
+            streamingService = nil
+            isRecording = false
+            recordingStartTime = nil
+            recordingMode = nil
+            processingStage = ""
+            processingProgress = 0.0
+            partialTranscription = ""
+            lastError = nil
+            lastNotice = shortRecordingNotice(duration: recordedDuration)
+            preconnectStreamingIfNeeded()
+            return
+        }
+
         isRecording = false
         recordingStartTime = nil
         isProcessing = true
@@ -1005,6 +1024,17 @@ class AppState: ObservableObject {
 
         debugLog("Recording stopped, file: \(audioURL.path)")
 
+        let recordedDuration = audioRecorder.recordingDuration
+        if recordedDuration < minimumRecordingDuration {
+            debugLog("Recording skipped because duration was \(recordedDuration)s")
+            isRecording = false
+            recordingStartTime = nil
+            recordingMode = nil
+            lastError = nil
+            lastNotice = shortRecordingNotice(duration: recordedDuration)
+            return
+        }
+
         // Check file size and validate
         var fileSize: Int64 = 0
         if let attrs = try? FileManager.default.attributesOfItem(atPath: audioURL.path),
@@ -1015,8 +1045,8 @@ class AppState: ObservableObject {
 
         // Check for empty/too short recording
         if fileSize < 1000 {  // Less than 1KB is likely empty
-            debugLog("Recording too short, skipping")
-            lastNotice = "Recording too short. Please speak for longer."
+            debugLog("Recording file was empty or invalid, skipping")
+            lastNotice = "Recording skipped because the audio file was empty or invalid. No transcription or translation was performed."
             isRecording = false
             recordingStartTime = nil
             recordingMode = nil
@@ -1177,6 +1207,11 @@ class AppState: ObservableObject {
 
         transcriptionChunkInfo = ""
         debugLog("Processing complete")
+    }
+
+    private func shortRecordingNotice(duration: TimeInterval) -> String {
+        let measuredDuration = String(format: "%.1f", max(0, duration))
+        return "Recording skipped: \(measuredDuration) seconds is shorter than the 2-second minimum. No transcription or translation was performed."
     }
 
     private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {

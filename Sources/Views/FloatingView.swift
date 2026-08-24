@@ -82,6 +82,13 @@ struct FloatingView: View {
                 appState.floatingWindowManager.makeKeyable(true)
             }
         }
+        .onChange(of: appState.lastNotice) { notice in
+            // Notices such as the explicit minimum-duration rejection should
+            // be visible immediately instead of being hidden behind the pill.
+            if notice != nil && !isExpanded {
+                toggleExpanded()
+            }
+        }
     }
 
     private func toggleExpanded() {

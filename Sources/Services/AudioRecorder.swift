@@ -194,8 +194,12 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     func endCaptureMonitoring() {
+        if isRecording {
+            updateDuration()
+        }
         stopLevelMonitoring()
         recordingURL = nil
+        recordingStartTime = nil
         isRecording = false
         audioLevel = 0.0
         peakLevel = 0.0
