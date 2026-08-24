@@ -351,6 +351,7 @@ class Settings: ObservableObject {
         static let localMLXDownloadURLs = "local_mlx_download_urls"
         static let localMLXChecksums = "local_mlx_checksums"
         static let muteSystemAudioWhileRecording = "mute_system_audio_while_recording"
+        static let selectedAudioInputDeviceUID = "selected_audio_input_device_uid"
 
         // Enhancement
         static let enhancementEnabled = "enhancement_enabled"
@@ -474,6 +475,10 @@ class Settings: ObservableObject {
 
     @Published var muteSystemAudioWhileRecording: Bool {
         didSet { defaults.set(muteSystemAudioWhileRecording, forKey: Keys.muteSystemAudioWhileRecording) }
+    }
+
+    @Published var selectedAudioInputDeviceUID: String {
+        didSet { defaults.set(selectedAudioInputDeviceUID, forKey: Keys.selectedAudioInputDeviceUID) }
     }
 
     // MARK: - Enhancement Settings
@@ -792,6 +797,7 @@ class Settings: ObservableObject {
         self.localMLXDownloadURLs = defaults.dictionary(forKey: Keys.localMLXDownloadURLs) as? [String: String] ?? [:]
         self.localMLXChecksums = defaults.dictionary(forKey: Keys.localMLXChecksums) as? [String: String] ?? [:]
         self.muteSystemAudioWhileRecording = defaults.object(forKey: Keys.muteSystemAudioWhileRecording) as? Bool ?? false
+        self.selectedAudioInputDeviceUID = defaults.string(forKey: Keys.selectedAudioInputDeviceUID) ?? ""
 
         // Enhancement settings
         self.enhancementEnabled = defaults.object(forKey: Keys.enhancementEnabled) as? Bool ?? true

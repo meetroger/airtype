@@ -4,12 +4,14 @@ struct MenuBarView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var floatingWindowManager: FloatingWindowManager
     @ObservedObject private var hotkeyManager: HotkeyManager
+    @ObservedObject private var audioInputDeviceManager: AudioInputDeviceManager
     @State private var isPulsing = false
 
     init(appState: AppState, floatingWindowManager: FloatingWindowManager) {
         self.appState = appState
         self.floatingWindowManager = floatingWindowManager
         self.hotkeyManager = appState.hotkeyManager
+        self.audioInputDeviceManager = appState.audioInputDeviceManager
     }
 
     var body: some View {
@@ -149,6 +151,7 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 6) {
                 configRow(label: "Service", value: appState.settings.transcriptionProvider.rawValue)
                 configRow(label: "Model", value: currentModel)
+                microphonePicker
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -234,6 +237,9 @@ struct MenuBarView: View {
         .frame(width: 260)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            audioInputDeviceManager.refreshDevices()
+        }
     }
 
     // MARK: - Computed Properties
@@ -290,6 +296,61 @@ struct MenuBarView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.primary)
         }
+    }
+
+    private var microphonePicker: some View {
+        Menu {
+            Button {
+                audioInputDeviceManager.selectDevice(uid: nil)
+            } label: {
+                if audioInputDeviceManager.selectedDeviceUID.isEmpty {
+                    Label(audioInputDeviceManager.systemDefaultLabel, systemImage: "checkmark")
+                } else {
+                    Text(audioInputDeviceManager.systemDefaultLabel)
+                }
+            }
+
+            if !audioInputDeviceManager.devices.isEmpty {
+                Divider()
+            }
+
+            ForEach(audioInputDeviceManager.devices) { device in
+                Button {
+                    audioInputDeviceManager.selectDevice(uid: device.uid)
+                } label: {
+                    if audioInputDeviceManager.selectedDeviceUID == device.uid {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Microphone")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(selectedMicrophoneLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(appState.isRecording)
+        .help(appState.isRecording ? "Stop recording before changing microphones" : "Choose microphone")
+    }
+
+    private var selectedMicrophoneLabel: String {
+        audioInputDeviceManager.selectedDeviceUID.isEmpty
+            ? "System Default"
+            : audioInputDeviceManager.selectedDeviceName
     }
 
     private func shortcutRow(action: String, keys: String) -> some View {

@@ -390,7 +390,7 @@ class WhisperService {
         // Audio file
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(audioContentType(for: fileName))\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
 
@@ -398,6 +398,16 @@ class WhisperService {
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
         return body
+    }
+
+    private func audioContentType(for fileName: String) -> String {
+        switch URL(fileURLWithPath: fileName).pathExtension.lowercased() {
+        case "wav": return "audio/wav"
+        case "m4a": return "audio/mp4"
+        case "mp3": return "audio/mpeg"
+        case "caf": return "audio/x-caf"
+        default: return "application/octet-stream"
+        }
     }
 
 }

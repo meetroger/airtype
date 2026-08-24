@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import CoreAudio
 import os.log
 
 private let logFile = FileManager.default.temporaryDirectory.appendingPathComponent("airtype_debug.log")
@@ -453,6 +454,7 @@ class AppState: ObservableObject {
     private var finalizedStreamText = ""
 
     let settings = Settings.shared
+    let audioInputDeviceManager = AudioInputDeviceManager()
     let audioRecorder = AudioRecorder()
     let whisperService = WhisperService()
     let elevenlabsService = ElevenLabsService()
@@ -740,10 +742,17 @@ class AppState: ObservableObject {
                 throw RecordingError.noPermission
             }
 
+            let selectedDeviceID = audioInputDeviceManager.deviceIDForRecording()
             if shouldUseStreaming {
-                try await startStreamingRecording()
+                try await startStreamingRecording(deviceID: selectedDeviceID)
             } else {
-                let url = try audioRecorder.startRecording()
+                let url: URL
+                do {
+                    url = try audioRecorder.startRecording(deviceID: selectedDeviceID)
+                } catch where selectedDeviceID != nil {
+                    audioInputDeviceManager.fallbackToSystemDefault()
+                    url = try audioRecorder.startRecording()
+                }
                 debugLog("Recording started, saving to: \(url.path)")
             }
 
@@ -769,7 +778,7 @@ class AppState: ObservableObject {
         }
     }
 
-    private func startStreamingRecording() async throws {
+    private func startStreamingRecording(deviceID: AudioDeviceID?) async throws {
         let service: DoubaoStreamingService
         if let preconnected = preconnectedStreamingService, await !preconnected.isStale() {
             service = preconnected
@@ -817,8 +826,38 @@ class AppState: ObservableObject {
         // Start audio capture and feed to WebSocket
         let capture = StreamingAudioCapture()
         self.streamingCapture = capture
-        try capture.start { [weak service] data in
+        let levelHandler: (Float, Float) -> Void = { [weak self] average, peak in
+            Task { @MainActor [weak self] in
+                self?.audioRecorder.updateCapturedLevels(average: average, peak: peak)
+            }
+        }
+        let chunkHandler: (Data) -> Void = { [weak service] data in
             Task { await service?.sendAudio(data) }
+        }
+
+        do {
+            let recordingURL: URL
+            do {
+                recordingURL = try capture.start(
+                    deviceID: deviceID,
+                    onLevel: levelHandler,
+                    onChunk: chunkHandler
+                )
+            } catch where deviceID != nil {
+                audioInputDeviceManager.fallbackToSystemDefault()
+                recordingURL = try capture.start(
+                    onLevel: levelHandler,
+                    onChunk: chunkHandler
+                )
+            }
+            audioRecorder.beginCaptureMonitoring(at: recordingURL)
+        } catch {
+            streamingCapture = nil
+            streamingEventTask?.cancel()
+            streamingEventTask = nil
+            streamingService = nil
+            await service.disconnect()
+            throw error
         }
         debugLog("Streaming audio capture started")
     }
@@ -827,6 +866,7 @@ class AppState: ObservableObject {
         let mode = recordingMode ?? .transcribe
         streamingCapture?.stop()
         streamingCapture = nil
+        audioRecorder.endCaptureMonitoring()
 
         isRecording = false
         recordingStartTime = nil
@@ -1162,6 +1202,7 @@ class AppState: ObservableObject {
         if shouldUseStreaming {
             streamingCapture?.stop(discard: true)
             streamingCapture = nil
+            audioRecorder.endCaptureMonitoring()
             streamingEventTask?.cancel()
             streamingEventTask = nil
             if let service = streamingService {
@@ -1192,6 +1233,7 @@ class AppState: ObservableObject {
         // Tear down any lingering streaming state
         streamingCapture?.stop(discard: true)
         streamingCapture = nil
+        audioRecorder.endCaptureMonitoring()
         streamingEventTask?.cancel()
         streamingEventTask = nil
         if let service = streamingService {

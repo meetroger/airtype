@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Foundation
 
 /// Handles microphone audio recording with level monitoring
@@ -20,7 +21,7 @@ class AudioRecorder: NSObject, ObservableObject {
     // File size tracking (for chunking decisions)
     @Published var estimatedFileSize: Int64 = 0
 
-    private var audioRecorder: AVAudioRecorder?
+    private var audioCapture: StreamingAudioCapture?
     private var recordingURL: URL?
     private var levelTimer: Timer?
     private var durationTimer: Timer?
@@ -106,46 +107,27 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     // MARK: - Recording
-    func startRecording() throws -> URL {
+    func startRecording(deviceID: AudioDeviceID? = nil) throws -> URL {
         guard hasPermission else {
             throw RecordingError.noPermission
         }
 
-        let url: URL
+        let capture = StreamingAudioCapture()
         do {
-            url = try Self.makeRecordingURL(fileExtension: "m4a")
-        } catch {
-            throw RecordingError.setupFailed("Could not create the recordings folder: \(error.localizedDescription)")
-        }
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 16000,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
-
-        do {
-            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-            audioRecorder?.isMeteringEnabled = true  // Enable audio level metering
-            audioRecorder?.record()
-            recordingURL = url
-            isRecording = true
-
-            // Reset and start tracking
-            recordingDuration = 0.0
-            recordingStartTime = Date()
-            audioLevel = 0.0
-            peakLevel = 0.0
-            maxLevelDuringRecording = 0.0
-            estimatedFileSize = 0
-
-            // Start level monitoring timer
-            startLevelMonitoring()
-
+            let url = try capture.start(
+                deviceID: deviceID,
+                onLevel: { [weak self] average, peak in
+                    Task { @MainActor [weak self] in
+                        self?.updateCapturedLevels(average: average, peak: peak)
+                    }
+                },
+                onChunk: { _ in }
+            )
+            audioCapture = capture
+            beginCaptureMonitoring(at: url)
             return url
         } catch {
-            try? FileManager.default.removeItem(at: url)
+            capture.stop(discard: true)
             throw RecordingError.setupFailed(error.localizedDescription)
         }
     }
@@ -153,11 +135,12 @@ class AudioRecorder: NSObject, ObservableObject {
     // MARK: - Level Monitoring
 
     private func startLevelMonitoring() {
-        // Use a timer to poll audio levels
+        // Audio levels arrive directly from the capture tap. This timer only
+        // polls file size for upload-limit warnings.
         levelTimer = Timer.scheduledTimer(withTimeInterval: levelUpdateInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor [weak self] in
-                self?.updateLevels()
+                self?.updateEstimatedFileSize()
             }
         }
 
@@ -177,22 +160,7 @@ class AudioRecorder: NSObject, ObservableObject {
         durationTimer = nil
     }
 
-    private func updateLevels() {
-        guard let recorder = audioRecorder, recorder.isRecording else { return }
-
-        recorder.updateMeters()
-
-        // Get average and peak power (in dB, typically -160 to 0)
-        let avgPower = recorder.averagePower(forChannel: 0)
-        let peakPower = recorder.peakPower(forChannel: 0)
-
-        // Normalize to 0.0-1.0 range (dB to linear)
-        // -60dB = silence, 0dB = max
-        audioLevel = normalizeDecibels(avgPower)
-        peakLevel = normalizeDecibels(peakPower)
-        maxLevelDuringRecording = max(maxLevelDuringRecording, audioLevel)
-
-        // Update estimated file size
+    private func updateEstimatedFileSize() {
         if let url = recordingURL,
            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
            let size = attrs[.size] as? Int64 {
@@ -200,20 +168,37 @@ class AudioRecorder: NSObject, ObservableObject {
         }
     }
 
+    func updateCapturedLevels(average: Float, peak: Float) {
+        guard isRecording else { return }
+        audioLevel = average
+        peakLevel = peak
+        maxLevelDuringRecording = max(maxLevelDuringRecording, average)
+    }
+
     private func updateDuration() {
         guard let startTime = recordingStartTime else { return }
         recordingDuration = Date().timeIntervalSince(startTime)
     }
 
-    /// Convert decibels to normalized 0.0-1.0 range
-    private func normalizeDecibels(_ db: Float) -> Float {
-        // Clamp to reasonable range
-        let minDb: Float = -60.0
-        let maxDb: Float = 0.0
-        let clampedDb = max(minDb, min(maxDb, db))
+    func beginCaptureMonitoring(at url: URL) {
+        stopLevelMonitoring()
+        recordingURL = url
+        isRecording = true
+        recordingDuration = 0.0
+        recordingStartTime = Date()
+        audioLevel = 0.0
+        peakLevel = 0.0
+        maxLevelDuringRecording = 0.0
+        estimatedFileSize = 0
+        startLevelMonitoring()
+    }
 
-        // Linear interpolation
-        return (clampedDb - minDb) / (maxDb - minDb)
+    func endCaptureMonitoring() {
+        stopLevelMonitoring()
+        recordingURL = nil
+        isRecording = false
+        audioLevel = 0.0
+        peakLevel = 0.0
     }
 
     /// Check if recording was all silence (max level never exceeded threshold)
@@ -239,27 +224,19 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     func stopRecording() -> URL? {
-        stopLevelMonitoring()
-        audioRecorder?.stop()
-        isRecording = false
-        audioLevel = 0.0
-        peakLevel = 0.0
-        let url = recordingURL
-        recordingURL = nil
+        let url = audioCapture?.stop()
+        audioCapture = nil
+        endCaptureMonitoring()
         return url
     }
 
     func cancelRecording() {
-        stopLevelMonitoring()
-        audioRecorder?.stop()
-        if let url = recordingURL {
-            try? FileManager.default.removeItem(at: url)
-        }
-        recordingURL = nil
-        isRecording = false
-        audioLevel = 0.0
-        peakLevel = 0.0
+        audioCapture?.stop(discard: true)
+        audioCapture = nil
+        endCaptureMonitoring()
         recordingDuration = 0.0
+        maxLevelDuringRecording = 0.0
+        estimatedFileSize = 0
     }
 
 }
