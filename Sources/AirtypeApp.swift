@@ -1240,6 +1240,15 @@ class AppState: ObservableObject {
             debugLog("Enhanced result: \(finalText)")
             streamOutput("\n--- Enhanced text ---")
             streamOutput(finalText)
+        } else if settings.hasCustomVocabulary {
+            debugLog("Starting vocabulary alignment...")
+            processingStage = "Aligning terminology..."
+            processingProgress = 0.75
+            streamOutput("\n--- Aligning terminology... ---")
+            finalText = try await enhancementService.alignVocabulary(text: finalText)
+            debugLog("Vocabulary-aligned result: \(finalText)")
+            streamOutput("\n--- Vocabulary-aligned text ---")
+            streamOutput(finalText)
         }
 
         processingProgress = 0.9

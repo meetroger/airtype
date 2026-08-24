@@ -357,6 +357,7 @@ class Settings: ObservableObject {
         static let enhancementEnabled = "enhancement_enabled"
         static let enhancementProvider = "enhancement_provider"
         static let enhancementPrompt = "enhancement_prompt"
+        static let customVocabulary = "custom_vocabulary"
 
         // Per-provider enhancement API keys
         static let enhancementApiKey_openai = "enhancement_api_key_openai"
@@ -493,6 +494,10 @@ class Settings: ObservableObject {
 
     @Published var enhancementPrompt: String {
         didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
+    }
+
+    @Published var customVocabulary: String {
+        didSet { defaults.set(customVocabulary, forKey: Keys.customVocabulary) }
     }
 
     // Per-provider API keys for enhancement
@@ -720,6 +725,28 @@ class Settings: ObservableObject {
         }
     }
 
+    /// Preferred terminology entered one item per line. Empty lines and
+    /// duplicate spellings are ignored while the user's canonical casing is
+    /// preserved for the LLM output.
+    var customVocabularyTerms: [String] {
+        var seen = Set<String>()
+        return customVocabulary
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { term in
+                let comparisonKey = term.folding(
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    locale: .current
+                )
+                return seen.insert(comparisonKey).inserted
+            }
+    }
+
+    var hasCustomVocabulary: Bool {
+        !customVocabularyTerms.isEmpty
+    }
+
     // MARK: - Validation
 
     var isConfigured: Bool {
@@ -761,7 +788,7 @@ class Settings: ObservableObject {
             }
         }
 
-        if (enhancementEnabled || translateOnLongPress)
+        if (enhancementEnabled || translateOnLongPress || hasCustomVocabulary)
             && enhancementProvider.requiresApiKey
             && currentEnhancementApiKey.isEmpty {
             return "\(enhancementProvider.rawValue) API key required for AI processing"
@@ -812,6 +839,7 @@ class Settings: ObservableObject {
         } else {
             self.enhancementPrompt = Settings.defaultEnhancementPrompt
         }
+        self.customVocabulary = defaults.string(forKey: Keys.customVocabulary) ?? ""
 
         // Initialize per-provider enhancement API keys
         var apiKeys: [EnhancementProvider: String] = [:]

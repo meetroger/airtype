@@ -663,7 +663,52 @@ struct MainView: View {
                 }
             }
 
-            if settings.enhancementEnabled || settings.translateOnLongPress {
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Custom Vocabulary")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer()
+                        Text("\(settings.customVocabularyTerms.count) terms")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+
+                    Text("Enter the exact spelling of preferred professional terms, one per line. The AI will use them only when the pronunciation and context match.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textSecondary)
+
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $settings.customVocabulary)
+                            .font(.system(size: 12, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .padding(4)
+                            .frame(height: 110)
+                            .background(Theme.bg)
+                            .clipShape(.rect(cornerRadius: 5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .stroke(Theme.border, lineWidth: 1)
+                            )
+
+                        if !settings.hasCustomVocabulary {
+                            Text("Claude Code\nOpenAI\nQwen3-ASR")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Theme.textTertiary)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                    Text("Saved automatically. A non-empty list uses the AI provider even when enhancement is disabled.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+
+            if settings.enhancementEnabled || settings.translateOnLongPress || settings.hasCustomVocabulary {
                 SettingsCard {
                     SettingsCardRow(label: "Provider") {
                         Picker("", selection: $settings.enhancementProvider) {
