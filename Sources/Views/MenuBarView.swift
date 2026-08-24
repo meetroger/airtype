@@ -5,6 +5,7 @@ struct MenuBarView: View {
     @ObservedObject var floatingWindowManager: FloatingWindowManager
     @ObservedObject private var hotkeyManager: HotkeyManager
     @ObservedObject private var audioInputDeviceManager: AudioInputDeviceManager
+    @ObservedObject private var audioRecorder: AudioRecorder
     @State private var isPulsing = false
 
     init(appState: AppState, floatingWindowManager: FloatingWindowManager) {
@@ -12,6 +13,7 @@ struct MenuBarView: View {
         self.floatingWindowManager = floatingWindowManager
         self.hotkeyManager = appState.hotkeyManager
         self.audioInputDeviceManager = appState.audioInputDeviceManager
+        self.audioRecorder = appState.audioRecorder
     }
 
     var body: some View {
@@ -35,13 +37,13 @@ struct MenuBarView: View {
                         Spacer()
 
                         // Duration display
-                        Text(appState.audioRecorder.formattedDuration)
+                        Text(audioRecorder.formattedDuration)
                             .font(.system(size: 13, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white)
                     }
 
                     // Audio level meter
-                    AudioLevelMeter(level: appState.audioRecorder.audioLevel, peakLevel: appState.audioRecorder.peakLevel)
+                    AudioLevelMeter(level: audioRecorder.audioLevel, peakLevel: audioRecorder.peakLevel)
 
                     // Hint text
                     Text(appState.recordingMode?.recordingHint ?? "Recording")
@@ -49,7 +51,7 @@ struct MenuBarView: View {
                         .foregroundStyle(.white.opacity(0.8))
 
                     // Warning for long recordings
-                    if appState.audioRecorder.isLongRecording {
+                    if audioRecorder.isLongRecording {
                         HStack(spacing: 4) {
                             Image(systemName: "info.circle.fill")
                                 .font(.system(size: 10))
