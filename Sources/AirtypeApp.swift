@@ -263,7 +263,10 @@ final class StatusBarController: NSObject {
         } else {
             glyphName = "mic.fill"
             glyphPointSize = 12
-            button.contentTintColor = .labelColor
+            // Let NSStatusBarButton tint the template image for the current
+            // menu-bar appearance. NSColor.labelColor follows the app window's
+            // appearance and can leave a black icon on a dark menu bar.
+            button.contentTintColor = nil
         }
 
         button.image = Self.makeStatusImage(
