@@ -250,23 +250,22 @@ final class StatusBarController: NSObject {
     private func updateIcon() {
         guard let button = statusItem.button else { return }
 
+        // All status artwork is a template image. Leave its tint unset in every
+        // app state so AppKit can choose a legible color for the current menu
+        // bar appearance and its highlighted state.
+        button.contentTintColor = nil
+
         let glyphName: String
         let glyphPointSize: CGFloat
         if appState.isRecording {
             glyphName = "circle.fill"
             glyphPointSize = 8
-            button.contentTintColor = .systemRed
         } else if appState.isProcessing {
             glyphName = "ellipsis"
             glyphPointSize = 12
-            button.contentTintColor = .systemOrange
         } else {
             glyphName = "mic.fill"
             glyphPointSize = 12
-            // Let NSStatusBarButton tint the template image for the current
-            // menu-bar appearance. NSColor.labelColor follows the app window's
-            // appearance and can leave a black icon on a dark menu bar.
-            button.contentTintColor = nil
         }
 
         button.image = Self.makeStatusImage(
