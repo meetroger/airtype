@@ -398,7 +398,6 @@ class Settings: ObservableObject {
         static let toggleModeModifiers = "toggle_mode_modifiers"
 
         // Floating window
-        static let showFloatingWindow = "show_floating_window"
         static let floatingWindowPosition = "floating_window_position"
         static let previewBeforeInsert = "preview_before_insert"
         static let hasCompletedSetup = "has_completed_setup"
@@ -516,10 +515,6 @@ class Settings: ObservableObject {
     }
 
     // MARK: - Floating Window Settings
-
-    @Published var showFloatingWindow: Bool {
-        didSet { defaults.set(showFloatingWindow, forKey: Keys.showFloatingWindow) }
-    }
 
     @Published var floatingWindowPosition: FloatingWindowPosition {
         didSet { defaults.set(floatingWindowPosition.rawValue, forKey: Keys.floatingWindowPosition) }
@@ -898,7 +893,6 @@ class Settings: ObservableObject {
         }
 
         // Floating window settings
-        self.showFloatingWindow = defaults.object(forKey: Keys.showFloatingWindow) as? Bool ?? true
         let positionRaw = defaults.string(forKey: Keys.floatingWindowPosition) ?? FloatingWindowPosition.bottomCenter.rawValue
         self.floatingWindowPosition = FloatingWindowPosition(rawValue: positionRaw) ?? .bottomCenter
         self.previewBeforeInsert = defaults.object(forKey: Keys.previewBeforeInsert) as? Bool ?? false

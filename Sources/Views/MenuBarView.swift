@@ -2,15 +2,13 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var appState: AppState
-    @ObservedObject var floatingWindowManager: FloatingWindowManager
     @ObservedObject private var hotkeyManager: HotkeyManager
     @ObservedObject private var audioInputDeviceManager: AudioInputDeviceManager
     @ObservedObject private var audioRecorder: AudioRecorder
     @State private var isPulsing = false
 
-    init(appState: AppState, floatingWindowManager: FloatingWindowManager) {
+    init(appState: AppState) {
         self.appState = appState
-        self.floatingWindowManager = floatingWindowManager
         self.hotkeyManager = appState.hotkeyManager
         self.audioInputDeviceManager = appState.audioInputDeviceManager
         self.audioRecorder = appState.audioRecorder
@@ -212,15 +210,6 @@ struct MenuBarView: View {
                 .padding(.vertical, 4)
 
             // Menu items
-            if appState.settings.showFloatingWindow {
-                MenuButton(
-                    title: floatingWindowManager.isVisible ? "Hide Floating Window" : "Show Floating Window",
-                    shortcut: nil
-                ) {
-                    floatingWindowManager.toggle(with: appState)
-                }
-            }
-
             MenuButton(title: "Recent Transcriptions", shortcut: nil) {
                 MainWindowController.shared.showHistory()
             }

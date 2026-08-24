@@ -196,10 +196,7 @@ final class StatusBarController: NSObject {
     }
 
     private func configurePopover() {
-        let menuView = MenuBarView(
-            appState: appState,
-            floatingWindowManager: appState.floatingWindowManager
-        )
+        let menuView = MenuBarView(appState: appState)
         let hostingController = NSHostingController(rootView: menuView)
         hostingController.sizingOptions = [.preferredContentSize]
 
@@ -328,14 +325,6 @@ class FloatingWindowManager: ObservableObject {
     func hide() {
         panel?.orderOut(nil)
         isVisible = false
-    }
-
-    func toggle(with appState: AppState) {
-        if isVisible {
-            hide()
-        } else {
-            show(with: appState)
-        }
     }
 
     func updateContent(with appState: AppState) {
@@ -770,10 +759,7 @@ class AppState: ObservableObject {
             lastNotice = nil
             partialTranscription = ""
 
-            // Show floating window if enabled
-            if settings.showFloatingWindow {
-                floatingWindowManager.show(with: self)
-            }
+            floatingWindowManager.show(with: self)
         } catch {
             debugLog("Failed to start recording: \(error)")
             recordingMode = nil
@@ -955,10 +941,8 @@ class AppState: ObservableObject {
                 processingProgress = 0.0
                 partialTranscription = ""
 
-                if settings.showFloatingWindow {
-                    let manager = floatingWindowManager
-                    Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
-                }
+                let manager = floatingWindowManager
+                Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
             }
         } catch is CancellationError {
             debugLog("Streaming processing cancelled")
@@ -1175,11 +1159,9 @@ class AppState: ObservableObject {
                 transcriptionChunkInfo = ""
 
                 // Hide floating window after successful insert (with delay for feedback)
-                if settings.showFloatingWindow {
-                    Task {
-                        try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second
-                        floatingWindowManager.hide()
-                    }
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second
+                    floatingWindowManager.hide()
                 }
             }
         } catch is CancellationError {
@@ -1312,10 +1294,8 @@ class AppState: ObservableObject {
         lastError = nil
         lastNotice = "Processing cancelled"
         systemAudioMuter.restore()
-        if settings.showFloatingWindow {
-            let manager = floatingWindowManager
-            Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
-        }
+        let manager = floatingWindowManager
+        Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
         // Re-establish streaming pre-connection if needed
         preconnectStreamingIfNeeded()
     }

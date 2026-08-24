@@ -851,45 +851,29 @@ struct MainView: View {
     private var floatingWindowSection: some View {
         SettingsSection(title: "Floating Window", icon: "macwindow") {
             SettingsCard {
-                Toggle(isOn: $settings.showFloatingWindow) {
+                SettingsCardRow(label: "Position") {
+                    Picker("", selection: $settings.floatingWindowPosition) {
+                        ForEach(FloatingWindowPosition.allCases) { position in
+                            Text(position.rawValue).tag(position)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                SettingsCardDivider()
+
+                Toggle(isOn: $settings.previewBeforeInsert) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Show floating window")
+                        Text("Confirm before inserting")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Display status and progress in a floating panel")
+                        Text("Review transcription before inserting at cursor")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .toggleStyle(.switch)
-            }
-
-            if settings.showFloatingWindow {
-                SettingsCard {
-                    SettingsCardRow(label: "Position") {
-                        Picker("", selection: $settings.floatingWindowPosition) {
-                            ForEach(FloatingWindowPosition.allCases) { position in
-                                Text(position.rawValue).tag(position)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-
-                    SettingsCardDivider()
-
-                    Toggle(isOn: $settings.previewBeforeInsert) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Confirm before inserting")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Theme.textPrimary)
-                            Text("Review transcription before inserting at cursor")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                }
             }
         }
     }
