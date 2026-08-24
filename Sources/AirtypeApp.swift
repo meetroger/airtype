@@ -1073,7 +1073,7 @@ class AppState: ObservableObject {
         do {
             // Step 1: Transcribe using selected provider (with progress for OpenAI)
             debugLog("Starting transcription with \(settings.transcriptionProvider.rawValue)...")
-            processingStage = "Thinking..."
+            processingStage = "Transcribing..."
             streamOutput("\n--- Transcribing (\(settings.transcriptionProvider.rawValue))... ---")
             lastStreamedLength = 0
             let rawTranscription: String

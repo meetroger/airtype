@@ -505,7 +505,7 @@ struct FloatingView: View {
         if appState.isRecording {
             return "Recording"
         } else if appState.isProcessing {
-            return appState.processingStage.isEmpty ? "Thinking..." : appState.processingStage
+            return appState.processingStage.isEmpty ? "Processing..." : appState.processingStage
         } else if appState.lastError != nil {
             return "Error"
         } else if appState.lastNotice != nil {
