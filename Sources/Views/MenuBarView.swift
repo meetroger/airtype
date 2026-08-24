@@ -299,57 +299,66 @@ struct MenuBarView: View {
     }
 
     private var microphonePicker: some View {
-        Menu {
-            Button {
-                audioInputDeviceManager.selectDevice(uid: nil)
-            } label: {
-                if audioInputDeviceManager.selectedDeviceUID.isEmpty {
-                    Label(audioInputDeviceManager.systemDefaultLabel, systemImage: "checkmark")
-                } else {
-                    Text(audioInputDeviceManager.systemDefaultLabel)
-                }
-            }
+        HStack(spacing: 6) {
+            Text("Microphone")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
 
-            if !audioInputDeviceManager.devices.isEmpty {
-                Divider()
-            }
+            Spacer(minLength: 8)
 
-            ForEach(audioInputDeviceManager.devices) { device in
+            // Keep the current choice outside Menu's custom label. SwiftUI can
+            // omit custom menu-label text on macOS, making the selection appear
+            // blank until the menu is opened.
+            Text(currentMicrophoneLabel)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 140, alignment: .trailing)
+
+            Menu {
                 Button {
-                    audioInputDeviceManager.selectDevice(uid: device.uid)
+                    audioInputDeviceManager.selectDevice(uid: nil)
                 } label: {
-                    if audioInputDeviceManager.selectedDeviceUID == device.uid {
-                        Label(device.name, systemImage: "checkmark")
+                    if audioInputDeviceManager.selectedDeviceUID.isEmpty {
+                        Label(audioInputDeviceManager.systemDefaultLabel, systemImage: "checkmark")
                     } else {
-                        Text(device.name)
+                        Text(audioInputDeviceManager.systemDefaultLabel)
                     }
                 }
-            }
-        } label: {
-            HStack {
-                Text("Microphone")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(selectedMicrophoneLabel)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+
+                if !audioInputDeviceManager.devices.isEmpty {
+                    Divider()
+                }
+
+                ForEach(audioInputDeviceManager.devices) { device in
+                    Button {
+                        audioInputDeviceManager.selectDevice(uid: device.uid)
+                    } label: {
+                        if audioInputDeviceManager.selectedDeviceUID == device.uid {
+                            Label(device.name, systemImage: "checkmark")
+                        } else {
+                            Text(device.name)
+                        }
+                    }
+                }
+            } label: {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 18)
+                    .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .menuStyle(.borderlessButton)
+            .disabled(appState.isRecording)
+            .accessibilityLabel("Choose microphone")
+            .help(appState.isRecording ? "Stop recording before changing microphones" : "Choose microphone")
         }
-        .menuStyle(.borderlessButton)
-        .disabled(appState.isRecording)
-        .help(appState.isRecording ? "Stop recording before changing microphones" : "Choose microphone")
     }
 
-    private var selectedMicrophoneLabel: String {
+    private var currentMicrophoneLabel: String {
         audioInputDeviceManager.selectedDeviceUID.isEmpty
-            ? "System Default"
+            ? audioInputDeviceManager.systemDefaultLabel
             : audioInputDeviceManager.selectedDeviceName
     }
 
