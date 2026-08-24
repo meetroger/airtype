@@ -223,11 +223,56 @@ class AudioRecorder: NSObject, ObservableObject {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    func stopRecording() -> URL? {
-        let url = audioCapture?.stop()
+    func stopRecording() async throws -> URL? {
+        let wavURL = audioCapture?.stop()
         audioCapture = nil
         endCaptureMonitoring()
-        return url
+        guard let wavURL else { return nil }
+
+        do {
+            return try await convertToM4A(wavURL: wavURL)
+        } catch let error as RecordingError {
+            throw error
+        } catch {
+            // Keep the finalized WAV as a recovery copy if encoding fails.
+            throw RecordingError.encodingFailed(error.localizedDescription)
+        }
+    }
+
+    private func convertToM4A(wavURL: URL) async throws -> URL {
+        let m4aURL = wavURL.deletingPathExtension().appendingPathExtension("m4a")
+        try? FileManager.default.removeItem(at: m4aURL)
+
+        let asset = AVURLAsset(url: wavURL)
+        guard let exportSession = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetAppleM4A
+        ) else {
+            throw RecordingError.encodingFailed("Could not create an M4A encoder")
+        }
+
+        exportSession.outputURL = m4aURL
+        exportSession.outputFileType = .m4a
+        await exportSession.export()
+
+        if let error = exportSession.error {
+            try? FileManager.default.removeItem(at: m4aURL)
+            throw error
+        }
+        guard exportSession.status == .completed else {
+            try? FileManager.default.removeItem(at: m4aURL)
+            throw RecordingError.encodingFailed(
+                "M4A export ended with status \(exportSession.status.rawValue)"
+            )
+        }
+
+        do {
+            try FileManager.default.removeItem(at: wavURL)
+        } catch {
+            debugLog("M4A was created, but the temporary WAV could not be removed: \(error.localizedDescription)")
+        }
+        debugLog("Converted microphone recording to M4A: \(m4aURL.path)")
+        return m4aURL
     }
 
     func cancelRecording() {
@@ -247,6 +292,7 @@ enum RecordingError: LocalizedError {
     case recordingTooShort
     case recordingFailed
     case microphoneInUse
+    case encodingFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -260,6 +306,8 @@ enum RecordingError: LocalizedError {
             return "Recording failed. Please try again."
         case .microphoneInUse:
             return "Microphone is in use by another app. Please close other recording apps."
+        case .encodingFailed(let reason):
+            return "Failed to save the recording as M4A: \(reason)"
         }
     }
 
@@ -275,6 +323,8 @@ enum RecordingError: LocalizedError {
             return "Check that your microphone is connected and working."
         case .microphoneInUse:
             return "Close apps like Zoom, Teams, or other recording software."
+        case .encodingFailed:
+            return "The original WAV recording was kept in the recordings folder."
         }
     }
 }

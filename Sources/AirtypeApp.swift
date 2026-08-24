@@ -980,9 +980,20 @@ class AppState: ObservableObject {
             return
         }
 
-        guard let audioURL = audioRecorder.stopRecording() else {
-            debugLog("No audio URL returned")
-            lastError = "No recording to process"
+        let audioURL: URL
+        do {
+            guard let completedURL = try await audioRecorder.stopRecording() else {
+                debugLog("No audio URL returned")
+                lastError = "No recording to process"
+                isRecording = false
+                recordingStartTime = nil
+                recordingMode = nil
+                return
+            }
+            audioURL = completedURL
+        } catch {
+            debugLog("Failed to finalize recording: \(error)")
+            lastError = error.localizedDescription
             isRecording = false
             recordingStartTime = nil
             recordingMode = nil
