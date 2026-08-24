@@ -860,20 +860,6 @@ struct MainView: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                 }
-
-                SettingsCardDivider()
-
-                Toggle(isOn: $settings.previewBeforeInsert) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Confirm before inserting")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("Review transcription before inserting at cursor")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                }
-                .toggleStyle(.switch)
             }
         }
     }

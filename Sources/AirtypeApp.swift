@@ -916,34 +916,24 @@ class AppState: ObservableObject {
 
             // Insert (bail out if cancelled while enhancing)
             try Task.checkCancellation()
-            if settings.previewBeforeInsert {
-                processingStage = "Ready to apply"
-                partialTranscription = finalText
-                processingProgress = 1.0
-                isProcessing = false
-                recordingMode = nil
-                lastError = nil
-                lastNotice = nil
-            } else {
-                processingProgress = 0.95
-                if !finalText.isEmpty {
-                    try await textInserter.insert(text: finalText)
-                    TranscriptionHistory.shared.save(text: finalText, inserted: true)
-                    debugLog("Inserted text (\(finalText.count) chars)")
-                }
-                streamOutput("Done!\n")
-
-                lastError = nil
-                lastNotice = nil
-                isProcessing = false
-                recordingMode = nil
-                processingStage = ""
-                processingProgress = 0.0
-                partialTranscription = ""
-
-                let manager = floatingWindowManager
-                Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
+            processingProgress = 0.95
+            if !finalText.isEmpty {
+                try await textInserter.insert(text: finalText)
+                TranscriptionHistory.shared.save(text: finalText, inserted: true)
+                debugLog("Inserted text (\(finalText.count) chars)")
             }
+            streamOutput("Done!\n")
+
+            lastError = nil
+            lastNotice = nil
+            isProcessing = false
+            recordingMode = nil
+            processingStage = ""
+            processingProgress = 0.0
+            partialTranscription = ""
+
+            let manager = floatingWindowManager
+            Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
         } catch is CancellationError {
             debugLog("Streaming processing cancelled")
             return
@@ -1122,47 +1112,32 @@ class AppState: ObservableObject {
             // Step 2: Correct and optionally translate according to the hotkey mode.
             let finalText = try await prepareFinalText(from: transcription, mode: mode)
 
-            // Step 3: Insert at cursor (or preview if enabled)
+            // Step 3: Insert at cursor
             try Task.checkCancellation()
-            if settings.previewBeforeInsert {
-                // Store for preview - user will manually apply
-                debugLog("Preview mode - waiting for user to apply")
-                processingStage = "Ready to apply"
-                streamOutput("\n--- Ready to apply (preview mode) ---")
-                partialTranscription = finalText
-                processingProgress = 1.0
-                isProcessing = false
-                recordingMode = nil
-                // Don't clear partialTranscription - user needs to see it
-                lastError = nil
-                lastNotice = nil
-            } else {
-                // Direct insert
-                debugLog("Inserting text...")
-                streamOutput("\n--- Inserting at cursor ---")
-                processingProgress = 0.95
-                try await textInserter.insert(text: finalText)
-                TranscriptionHistory.shared.save(text: finalText, inserted: true)
-                debugLog("Text inserted successfully")
-                streamOutput("Done!\n")
-                processingProgress = 1.0
+            debugLog("Inserting text...")
+            streamOutput("\n--- Inserting at cursor ---")
+            processingProgress = 0.95
+            try await textInserter.insert(text: finalText)
+            TranscriptionHistory.shared.save(text: finalText, inserted: true)
+            debugLog("Text inserted successfully")
+            streamOutput("Done!\n")
+            processingProgress = 1.0
 
-                lastError = nil
-                lastNotice = nil
+            lastError = nil
+            lastNotice = nil
 
-                // Cleanup
-                isProcessing = false
-                recordingMode = nil
-                processingStage = ""
-                processingProgress = 0.0
-                partialTranscription = ""
-                transcriptionChunkInfo = ""
+            // Cleanup
+            isProcessing = false
+            recordingMode = nil
+            processingStage = ""
+            processingProgress = 0.0
+            partialTranscription = ""
+            transcriptionChunkInfo = ""
 
-                // Hide floating window after successful insert (with delay for feedback)
-                Task {
-                    try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second
-                    floatingWindowManager.hide()
-                }
+            // Hide floating window after successful insert (with delay for feedback)
+            Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second
+                floatingWindowManager.hide()
             }
         } catch is CancellationError {
             debugLog("Processing cancelled")

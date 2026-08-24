@@ -64,24 +64,6 @@ struct FloatingView: View {
         .onHover { hovering in
             isHovering = hovering
         }
-        .onChange(of: appState.isRecording) { isRecording in
-            // Auto-expand when recording starts in preview mode
-            if isRecording && !isExpanded && appState.settings.previewBeforeInsert {
-                toggleExpanded()
-            }
-        }
-        .onChange(of: appState.partialTranscription) { newValue in
-            // Auto-expand when streaming text starts arriving during recording
-            if appState.isRecording && !newValue.isEmpty && !isExpanded && appState.settings.previewBeforeInsert {
-                toggleExpanded()
-            }
-        }
-        .onChange(of: appState.isProcessing) { isProcessing in
-            // Make panel keyable when processing completes with a result to edit
-            if !isProcessing && !appState.partialTranscription.isEmpty && appState.settings.previewBeforeInsert {
-                appState.floatingWindowManager.makeKeyable(true)
-            }
-        }
         .onChange(of: appState.lastNotice) { notice in
             // Notices such as the explicit minimum-duration rejection should
             // be visible immediately instead of being hidden behind the pill.
@@ -436,34 +418,6 @@ struct FloatingView: View {
                         )
                 }
                 .buttonStyle(.plain)
-            } else if !appState.partialTranscription.isEmpty && !appState.isProcessing && appState.settings.previewBeforeInsert {
-                // Apply button (when preview mode is enabled)
-                Button(action: { applyText() }) {
-                    Text("Apply")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.accentColor)
-                        )
-                }
-                .buttonStyle(.plain)
-
-                // Discard button
-                Button(action: { discardText() }) {
-                    Text("Discard")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(secondaryLabelColor)
-                        .frame(width: 80)
-                        .frame(height: 32)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(quaternaryLabelColor)
-                        )
-                }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -530,8 +484,7 @@ struct FloatingView: View {
     }
 
     private var showActionButtons: Bool {
-        appState.isRecording ||
-        (!appState.partialTranscription.isEmpty && !appState.isProcessing && appState.settings.previewBeforeInsert)
+        appState.isRecording
     }
 
     private var currentCornerRadius: CGFloat {
@@ -540,31 +493,6 @@ struct FloatingView: View {
 
     private var currentContentSize: CGSize {
         isExpanded ? expandedSize : pillSize
-    }
-
-    // MARK: - Actions
-
-    private func applyText() {
-        let text = appState.partialTranscription
-        appState.partialTranscription = ""
-        appState.floatingWindowManager.resignKeyAndActivatePreviousApp()
-        Task {
-            // Give the previous app time to activate
-            try await Task.sleep(nanoseconds: 150_000_000)
-            do {
-                try await appState.textInserter.insert(text: text)
-                TranscriptionHistory.shared.save(text: text, inserted: true)
-            } catch {
-                TranscriptionHistory.shared.save(text: text, inserted: false)
-                appState.lastError = error.localizedDescription
-            }
-        }
-    }
-
-    private func discardText() {
-        appState.partialTranscription = ""
-        appState.lastError = nil
-        appState.lastNotice = nil
     }
 
 }

@@ -399,7 +399,6 @@ class Settings: ObservableObject {
 
         // Floating window
         static let floatingWindowPosition = "floating_window_position"
-        static let previewBeforeInsert = "preview_before_insert"
         static let hasCompletedSetup = "has_completed_setup"
     }
 
@@ -518,10 +517,6 @@ class Settings: ObservableObject {
 
     @Published var floatingWindowPosition: FloatingWindowPosition {
         didSet { defaults.set(floatingWindowPosition.rawValue, forKey: Keys.floatingWindowPosition) }
-    }
-
-    @Published var previewBeforeInsert: Bool {
-        didSet { defaults.set(previewBeforeInsert, forKey: Keys.previewBeforeInsert) }
     }
 
     @Published var hasCompletedSetup: Bool {
@@ -895,7 +890,6 @@ class Settings: ObservableObject {
         // Floating window settings
         let positionRaw = defaults.string(forKey: Keys.floatingWindowPosition) ?? FloatingWindowPosition.bottomCenter.rawValue
         self.floatingWindowPosition = FloatingWindowPosition(rawValue: positionRaw) ?? .bottomCenter
-        self.previewBeforeInsert = defaults.object(forKey: Keys.previewBeforeInsert) as? Bool ?? false
         self.hasCompletedSetup = defaults.object(forKey: Keys.hasCompletedSetup) as? Bool ?? false
     }
 
