@@ -469,7 +469,7 @@ class AppState: ObservableObject {
     private var sharedShortcutStartedRecording = false
     private var sharedShortcutStopsToggle = false
     private let sharedShortcutHoldDelay: UInt64 = 350_000_000
-    private let minimumRecordingDuration: TimeInterval = 2.0
+    private let minimumRecordingDuration: TimeInterval = 1.0
 
     var menuBarIcon: String {
         if isRecording {
@@ -1167,7 +1167,7 @@ class AppState: ObservableObject {
 
     private func shortRecordingNotice(duration: TimeInterval) -> String {
         let measuredDuration = String(format: "%.1f", max(0, duration))
-        return "Recording skipped: \(measuredDuration) seconds is shorter than the 2-second minimum. No transcription or translation was performed."
+        return "Recording skipped: \(measuredDuration) seconds is shorter than the 1-second minimum. No transcription or translation was performed."
     }
 
     private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {
