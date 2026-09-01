@@ -8,8 +8,9 @@ enum MLXAudioRunner {
     private static let idleUnloadDelayNanoseconds: UInt64 = 60_000_000_000
     private static var loadedQwenModel: Qwen3ASRModel?
     private static var loadedModelID: String?
-    private static var loadingQwenModelTask: Task<Qwen3ASRModel, Error>?
+    private static var loadingQwenModelTask: Task<Void, Never>?
     private static var loadingModelID: String?
+    private static var modelLoadError: Error?
     private static var modelLoadGeneration = 0
     private static var idleUnloadTask: Task<Void, Never>?
     private static var recordingPrewarmModelID: String?
@@ -149,7 +150,8 @@ enum MLXAudioRunner {
 
         if loadingModelID == modelID, let loadingQwenModelTask {
             debugLog("Waiting for MLX model prewarm: \(modelID)")
-            return try await loadingQwenModelTask.value
+            await loadingQwenModelTask.value
+            return try loadedModelAfterLoad(modelID: modelID)
         }
 
         if loadedQwenModel != nil {
@@ -162,30 +164,37 @@ enum MLXAudioRunner {
         debugLog("Loading MLX model: \(modelID)")
         modelLoadGeneration &+= 1
         let generation = modelLoadGeneration
-        let loadTask = Task { @MainActor in
-            try await Qwen3ASRModel.fromPretrained(modelID)
-        }
-        loadingQwenModelTask = loadTask
         loadingModelID = modelID
-
-        do {
-            let model = try await loadTask.value
-            guard generation == modelLoadGeneration, loadingModelID == modelID else {
-                throw CancellationError()
-            }
-            loadedQwenModel = model
-            loadedModelID = modelID
-            loadingQwenModelTask = nil
-            loadingModelID = nil
-            clearUnusedMemory(context: "after loading model")
-            return model
-        } catch {
-            if generation == modelLoadGeneration {
+        modelLoadError = nil
+        let loadTask = Task { @MainActor in
+            do {
+                let model = try await Qwen3ASRModel.fromPretrained(modelID)
+                guard generation == modelLoadGeneration, loadingModelID == modelID else { return }
+                loadedQwenModel = model
+                loadedModelID = modelID
+                loadingQwenModelTask = nil
+                loadingModelID = nil
+                clearUnusedMemory(context: "after loading model")
+            } catch {
+                guard generation == modelLoadGeneration else { return }
+                modelLoadError = error
                 loadingQwenModelTask = nil
                 loadingModelID = nil
             }
-            throw error
         }
+        loadingQwenModelTask = loadTask
+        await loadTask.value
+        return try loadedModelAfterLoad(modelID: modelID)
+    }
+
+    private static func loadedModelAfterLoad(modelID: String) throws -> Qwen3ASRModel {
+        if loadedModelID == modelID, let loadedQwenModel {
+            return loadedQwenModel
+        }
+        if let modelLoadError {
+            throw modelLoadError
+        }
+        throw CancellationError()
     }
 
     private static func loadModelForInstallation(modelID: String) async throws {
@@ -223,6 +232,7 @@ enum MLXAudioRunner {
         loadingQwenModelTask?.cancel()
         loadingQwenModelTask = nil
         loadingModelID = nil
+        modelLoadError = nil
     }
 
     private static func releaseLoadedModel(reason: String) {
