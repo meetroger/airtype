@@ -579,7 +579,7 @@ struct MainView: View {
                     .controlSize(.small)
 
                     Button("Remove") {
-                        localModelManager.removeSelectedModel(settings: settings)
+                        Task { await localModelManager.removeSelectedModel(settings: settings) }
                     }
                     .disabled(!settings.selectedLocalModelInstalled || localModelManager.isRemoving)
                     .buttonStyle(.bordered)

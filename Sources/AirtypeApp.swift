@@ -462,6 +462,7 @@ class AppState: ObservableObject {
     private var preconnectedStreamingService: DoubaoStreamingService?
     private var preconnectTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
+    private var localASRPrewarmRequest: (id: UUID, task: Task<Void, Never>)?
     private var isStartingPushToTalk = false
     private var pushToTalkReleasePending = false
     private var isStopRequested = false
@@ -855,7 +856,21 @@ class AppState: ObservableObject {
     private func prewarmLocalASRIfNeeded() {
         guard settings.transcriptionProvider == .localMLX,
               settings.selectedLocalModelInstalled else { return }
-        MLXAudioRunner.beginRecordingPrewarm(modelID: settings.localMLXModel.repoID)
+        let recordingID = UUID()
+        let modelID = settings.localMLXModel.repoID
+        let task = Task {
+            await MLXAudioRunner.beginRecordingPrewarm(modelID: modelID, recordingID: recordingID)
+        }
+        localASRPrewarmRequest = (recordingID, task)
+    }
+
+    private func finishLocalASRPrewarm() {
+        guard let request = localASRPrewarmRequest else { return }
+        localASRPrewarmRequest = nil
+        Task {
+            await request.task.value
+            await MLXAudioRunner.finishRecordingPrewarm(recordingID: request.id)
+        }
     }
 
     private func stopStreamingAndProcess() async {
@@ -972,7 +987,7 @@ class AppState: ObservableObject {
             return
         }
         let mode = recordingMode ?? .transcribe
-        MLXAudioRunner.finishRecordingPrewarm()
+        finishLocalASRPrewarm()
 
         // Keep other audio muted through transcription/enhancement, and always
         // restore the exact prior output state on every completion path.
@@ -1221,7 +1236,7 @@ class AppState: ObservableObject {
     }
 
     func cancelRecording() {
-        MLXAudioRunner.finishRecordingPrewarm()
+        finishLocalASRPrewarm()
         if shouldUseStreaming {
             streamingCapture?.stop(discard: true)
             streamingCapture = nil
@@ -1251,7 +1266,7 @@ class AppState: ObservableObject {
 
     func cancelProcessing() {
         debugLog("Cancelling processing/enhancement")
-        MLXAudioRunner.finishRecordingPrewarm()
+        finishLocalASRPrewarm()
         processingTask?.cancel()
         processingTask = nil
         // Tear down any lingering streaming state

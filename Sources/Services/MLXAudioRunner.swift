@@ -3,7 +3,12 @@ import MLX
 import MLXAudioCore
 import MLXAudioSTT
 
-@MainActor
+@globalActor
+actor MLXAudioGlobalActor {
+    static let shared = MLXAudioGlobalActor()
+}
+
+@MLXAudioGlobalActor
 enum MLXAudioRunner {
     private static let idleUnloadDelayNanoseconds: UInt64 = 60_000_000_000
     private static var loadedQwenModel: Qwen3ASRModel?
@@ -14,22 +19,24 @@ enum MLXAudioRunner {
     private static var modelLoadGeneration = 0
     private static var idleUnloadTask: Task<Void, Never>?
     private static var recordingPrewarmModelID: String?
+    private static var recordingPrewarmID: UUID?
     private static var prewarmTask: Task<Void, Never>?
     private static var prewarmGeneration = 0
     private static var activeTranscriptionCount = 0
 
-    static func beginRecordingPrewarm(modelID: String) {
+    static func beginRecordingPrewarm(modelID: String, recordingID: UUID) {
         guard modelID.contains("Qwen3-ASR") else { return }
 
         cancelIdleUnload()
         recordingPrewarmModelID = modelID
+        recordingPrewarmID = recordingID
         prewarmGeneration &+= 1
         let generation = prewarmGeneration
         prewarmTask?.cancel()
 
         debugLog("Prewarming MLX model while recording: \(modelID)")
         let startedAt = Date()
-        prewarmTask = Task { @MainActor in
+        prewarmTask = Task { @MLXAudioGlobalActor in
             do {
                 _ = try await qwenModel(for: modelID)
                 guard generation == prewarmGeneration else { return }
@@ -51,8 +58,10 @@ enum MLXAudioRunner {
         }
     }
 
-    static func finishRecordingPrewarm() {
+    static func finishRecordingPrewarm(recordingID: UUID) {
+        guard recordingPrewarmID == recordingID else { return }
         recordingPrewarmModelID = nil
+        recordingPrewarmID = nil
         scheduleIdleUnloadIfUnused()
     }
 
@@ -95,6 +104,7 @@ enum MLXAudioRunner {
     ) async throws -> String {
         cancelIdleUnload()
         recordingPrewarmModelID = nil
+        recordingPrewarmID = nil
         activeTranscriptionCount += 1
         defer {
             activeTranscriptionCount -= 1
@@ -166,7 +176,7 @@ enum MLXAudioRunner {
         let generation = modelLoadGeneration
         loadingModelID = modelID
         modelLoadError = nil
-        let loadTask = Task { @MainActor in
+        let loadTask = Task { @MLXAudioGlobalActor in
             do {
                 let model = try await Qwen3ASRModel.fromPretrained(modelID)
                 guard generation == modelLoadGeneration, loadingModelID == modelID else { return }
@@ -203,7 +213,7 @@ enum MLXAudioRunner {
 
     private static func scheduleIdleUnload() {
         cancelIdleUnload()
-        idleUnloadTask = Task { @MainActor in
+        idleUnloadTask = Task { @MLXAudioGlobalActor in
             do {
                 try await Task.sleep(nanoseconds: idleUnloadDelayNanoseconds)
             } catch {

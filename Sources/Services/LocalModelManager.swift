@@ -28,12 +28,12 @@ final class LocalModelManager: ObservableObject {
         }
     }
 
-    func removeSelectedModel(settings: Settings = .shared) {
+    func removeSelectedModel(settings: Settings = .shared) async {
         guard settings.selectedLocalModelInstalled else { return }
         isRemoving = true
         defer { isRemoving = false }
 
-        MLXAudioRunner.removeModel(modelID: settings.localMLXModel.repoID)
+        await MLXAudioRunner.removeModel(modelID: settings.localMLXModel.repoID)
         settings.localMLXInstalledModels.removeAll { $0 == settings.localMLXModel.rawValue }
         statusMessage = "Removed \(settings.localMLXModel.rawValue)"
         lastError = nil
