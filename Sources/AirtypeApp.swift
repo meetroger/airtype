@@ -759,6 +759,7 @@ class AppState: ObservableObject {
             lastNotice = nil
             partialTranscription = ""
 
+            prewarmLocalASRIfNeeded()
             floatingWindowManager.show(with: self)
         } catch {
             debugLog("Failed to start recording: \(error)")
@@ -849,6 +850,12 @@ class AppState: ObservableObject {
             throw error
         }
         debugLog("Streaming audio capture started")
+    }
+
+    private func prewarmLocalASRIfNeeded() {
+        guard settings.transcriptionProvider == .localMLX,
+              settings.selectedLocalModelInstalled else { return }
+        MLXAudioRunner.beginRecordingPrewarm(modelID: settings.localMLXModel.repoID)
     }
 
     private func stopStreamingAndProcess() async {
@@ -965,6 +972,7 @@ class AppState: ObservableObject {
             return
         }
         let mode = recordingMode ?? .transcribe
+        MLXAudioRunner.finishRecordingPrewarm()
 
         // Keep other audio muted through transcription/enhancement, and always
         // restore the exact prior output state on every completion path.
@@ -1213,6 +1221,7 @@ class AppState: ObservableObject {
     }
 
     func cancelRecording() {
+        MLXAudioRunner.finishRecordingPrewarm()
         if shouldUseStreaming {
             streamingCapture?.stop(discard: true)
             streamingCapture = nil
@@ -1242,6 +1251,7 @@ class AppState: ObservableObject {
 
     func cancelProcessing() {
         debugLog("Cancelling processing/enhancement")
+        MLXAudioRunner.finishRecordingPrewarm()
         processingTask?.cancel()
         processingTask = nil
         // Tear down any lingering streaming state
