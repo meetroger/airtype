@@ -3,6 +3,12 @@ import Foundation
 /// OpenAI GPT service for speech-to-text error correction
 /// Fixes transcription errors while preserving the speaker's original words
 class EnhancementService {
+    enum PrewarmOperation: Equatable {
+        case enhancement
+        case vocabularyAlignment
+        case translation(TranslationTargetLanguage)
+    }
+
     private let settings: Settings
 
     init(settings: Settings = .shared) {
@@ -50,11 +56,42 @@ class EnhancementService {
         )
     }
 
+    /// Rebuilds the local model's allocator and reusable system-prompt prefix while
+    /// recording is in progress. Qwen3.8's hybrid cache needs two different suffixes
+    /// to plant an anchor at the transcript boundary after its rungs were discarded.
+    func prewarm(for operation: PrewarmOperation) async throws {
+        guard supportsLocalPrewarming else { return }
+
+        let prompt: String
+        switch operation {
+        case .enhancement:
+            prompt = enhancementPrompt
+        case .vocabularyAlignment:
+            prompt = vocabularyAlignmentPrompt
+        case .translation(let targetLanguage):
+            prompt = translationPrompt(for: targetLanguage)
+        }
+
+        for marker in ["A", "B"] {
+            try Task.checkCancellation()
+            _ = try await process(
+                text: marker,
+                prompt: prompt,
+                operation: "Local LLM prewarm \(marker)",
+                skipVeryShortText: false,
+                maxCompletionTokens: 1,
+                acceptsEmptyOutput: true
+            )
+        }
+    }
+
     private func process(
         text: String,
         prompt: String,
         operation: String,
-        skipVeryShortText: Bool
+        skipVeryShortText: Bool,
+        maxCompletionTokens: Int = 2048,
+        acceptsEmptyOutput: Bool = false
     ) async throws -> String {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedText.isEmpty || (skipVeryShortText && trimmedText.count < 3) {
@@ -106,7 +143,7 @@ class EnhancementService {
                 ChatMessage(role: "user", content: transcriptJSON)
             ],
             temperature: supportsTemperature ? 0.1 : nil,
-            maxCompletionTokens: 2048
+            maxCompletionTokens: maxCompletionTokens
         )
 
         request.httpBody = try JSONEncoder().encode(requestBody)
@@ -118,6 +155,8 @@ class EnhancementService {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch let error as URLError {
             switch error.code {
+            case .cancelled:
+                throw CancellationError()
             case .timedOut:
                 throw EnhancementError.networkTimeout
             case .notConnectedToInternet, .networkConnectionLost:
@@ -163,7 +202,9 @@ class EnhancementService {
         }
 
         let completion = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+        logMLXMetrics(completion.mlxDSparkMetrics, operation: operation)
         guard let enhancedText = completion.choices.first?.message.content else {
+            if acceptsEmptyOutput { return "" }
             throw EnhancementError.noContent
         }
 
@@ -171,10 +212,30 @@ class EnhancementService {
 
         // If enhancement returned empty, use original
         if result.isEmpty {
+            if acceptsEmptyOutput { return "" }
             return trimmedText
         }
 
         return result
+    }
+
+    var supportsLocalPrewarming: Bool {
+        let baseURL = settings.currentEnhancementBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return false }
+        return ["localhost", "127.0.0.1", "::1", "0.0.0.0"].contains(host)
+            || host.hasSuffix(".localhost")
+    }
+
+    private func logMLXMetrics(_ metrics: MLXDSparkMetrics?, operation: String) {
+        guard let metrics else { return }
+        let swapBytes = metrics.swapDeltaBytes ?? 0
+        debugLog(
+            "\(operation): MLX prompt=\(metrics.promptTokens ?? 0), "
+            + "cached=\(metrics.cachedTokens ?? 0), "
+            + "prefill=\(metrics.prefillSeconds ?? 0)s, "
+            + "ttft=\(metrics.ttftSeconds ?? 0)s, "
+            + "swap=\(swapBytes) bytes, cold=\(metrics.cold ?? false)"
+        )
     }
 
     /// Fetches model IDs from an OpenAI-compatible `/models` endpoint.
@@ -329,6 +390,30 @@ private struct TranscriptInput: Encodable {
 
 struct ChatCompletionResponse: Codable {
     let choices: [Choice]
+    let mlxDSparkMetrics: MLXDSparkMetrics?
+
+    enum CodingKeys: String, CodingKey {
+        case choices
+        case mlxDSparkMetrics = "x_mlx_dspark"
+    }
+}
+
+struct MLXDSparkMetrics: Codable {
+    let promptTokens: Int?
+    let cachedTokens: Int?
+    let prefillSeconds: Double?
+    let ttftSeconds: Double?
+    let swapDeltaBytes: Int64?
+    let cold: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case cachedTokens = "cached_tokens"
+        case prefillSeconds = "prefill_seconds"
+        case ttftSeconds = "ttft_seconds"
+        case swapDeltaBytes = "swap_delta_bytes"
+        case cold
+    }
 }
 
 struct Choice: Codable {

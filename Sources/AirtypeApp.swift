@@ -463,6 +463,10 @@ class AppState: ObservableObject {
     private var preconnectTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
     private var localASRPrewarmRequest: (id: UUID, task: Task<Void, Never>)?
+    private var localLLMPrewarmRequest: (
+        operation: EnhancementService.PrewarmOperation,
+        task: Task<Void, Never>
+    )?
     private var isStartingPushToTalk = false
     private var pushToTalkReleasePending = false
     private var isStopRequested = false
@@ -604,8 +608,12 @@ class AppState: ObservableObject {
                   self.hotkeyManager.isPushToTalkPressed,
                   self.sharedShortcutStartedRecording,
                   self.recordingMode == .transcribe else { return }
-            self.recordingMode = self.pushToTalkRecordingMode
+            let promotedMode = self.pushToTalkRecordingMode
+            self.recordingMode = promotedMode
             debugLog("Shared shortcut promoted to Push-to-talk mode: \(String(describing: self.recordingMode))")
+            if self.isRecording {
+                self.prewarmLocalLLMIfNeeded(for: promotedMode)
+            }
         }
 
         await startRecording(mode: .transcribe)
@@ -761,6 +769,7 @@ class AppState: ObservableObject {
             partialTranscription = ""
 
             prewarmLocalASRIfNeeded()
+            prewarmLocalLLMIfNeeded(for: recordingMode ?? mode)
             floatingWindowManager.show(with: self)
         } catch {
             debugLog("Failed to start recording: \(error)")
@@ -871,6 +880,68 @@ class AppState: ObservableObject {
             await request.task.value
             await MLXAudioRunner.finishRecordingPrewarm(recordingID: request.id)
         }
+    }
+
+    private func localLLMPrewarmOperation(
+        for mode: RecordingMode
+    ) -> EnhancementService.PrewarmOperation? {
+        if mode == .translateToTargetLanguage {
+            return .translation(settings.translationTargetLanguage)
+        }
+        if settings.enhancementEnabled {
+            return .enhancement
+        }
+        if settings.hasCustomVocabulary {
+            return .vocabularyAlignment
+        }
+        return nil
+    }
+
+    private func prewarmLocalLLMIfNeeded(for mode: RecordingMode) {
+        guard enhancementService.supportsLocalPrewarming,
+              let operation = localLLMPrewarmOperation(for: mode) else {
+            cancelLocalLLMPrewarm()
+            return
+        }
+        if localLLMPrewarmRequest?.operation == operation { return }
+
+        cancelLocalLLMPrewarm()
+        debugLog("Starting local LLM prewarm for \(operation)")
+        let service = enhancementService
+        let task = Task {
+            do {
+                try await service.prewarm(for: operation)
+                try Task.checkCancellation()
+                debugLog("Local LLM prewarm completed for \(operation)")
+            } catch is CancellationError {
+                debugLog("Local LLM prewarm cancelled for \(operation)")
+            } catch {
+                // Prewarming is an optimization. The real request must still run so
+                // transient server startup or connectivity errors remain recoverable.
+                debugLog("Local LLM prewarm failed for \(operation): \(error.localizedDescription)")
+            }
+        }
+        localLLMPrewarmRequest = (operation, task)
+    }
+
+    private func waitForLocalLLMPrewarm(for mode: RecordingMode) async {
+        guard let operation = localLLMPrewarmOperation(for: mode),
+              let request = localLLMPrewarmRequest else { return }
+        guard request.operation == operation else {
+            cancelLocalLLMPrewarm()
+            return
+        }
+
+        localLLMPrewarmRequest = nil
+        if !request.task.isCancelled {
+            debugLog("Waiting for local LLM prewarm to finish for \(operation)")
+        }
+        await request.task.value
+    }
+
+    private func cancelLocalLLMPrewarm() {
+        localLLMPrewarmRequest?.task.cancel()
+        localLLMPrewarmRequest = nil
     }
 
     private func stopStreamingAndProcess() async {
@@ -991,7 +1062,10 @@ class AppState: ObservableObject {
 
         // Keep other audio muted through transcription/enhancement, and always
         // restore the exact prior output state on every completion path.
-        defer { systemAudioMuter.restore() }
+        defer {
+            cancelLocalLLMPrewarm()
+            systemAudioMuter.restore()
+        }
 
         if shouldUseStreaming {
             await stopStreamingAndProcess()
@@ -1194,6 +1268,8 @@ class AppState: ObservableObject {
     }
 
     private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {
+        await waitForLocalLLMPrewarm(for: mode)
+
         if mode == .translateToTargetLanguage {
             let targetLanguage = settings.translationTargetLanguage
             let usesEnhancement = settings.enhancementEnabled
@@ -1237,6 +1313,7 @@ class AppState: ObservableObject {
 
     func cancelRecording() {
         finishLocalASRPrewarm()
+        cancelLocalLLMPrewarm()
         if shouldUseStreaming {
             streamingCapture?.stop(discard: true)
             streamingCapture = nil
@@ -1267,6 +1344,7 @@ class AppState: ObservableObject {
     func cancelProcessing() {
         debugLog("Cancelling processing/enhancement")
         finishLocalASRPrewarm()
+        cancelLocalLLMPrewarm()
         processingTask?.cancel()
         processingTask = nil
         // Tear down any lingering streaming state
