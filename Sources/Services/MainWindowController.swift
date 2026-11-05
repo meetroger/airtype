@@ -77,16 +77,28 @@ class MainWindowController {
 
     private var historyWindow: NSWindow?
     private var historyWindowDelegate: NSWindowDelegate?
+    private var historyTarget: DictationTarget?
+
+    /// Called before the menu popover can take keyboard focus.
+    func prepareHistoryTarget() {
+        historyTarget = try? DictationTarget.capture()
+    }
 
     func showHistory() {
+        if let current = try? DictationTarget.capture() { historyTarget = current }
+        let target = historyTarget
+        historyTarget = nil
+        let historyView = TranscriptionHistoryView(target: target, onInserted: { [weak self] in
+            self?.historyWindow?.orderOut(nil)
+        })
+        let hostingView = NSHostingView(rootView: historyView)
         if let existing = historyWindow {
+            existing.contentView = hostingView
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let historyView = TranscriptionHistoryView()
-        let hostingView = NSHostingView(rootView: historyView)
         hostingView.frame = NSRect(x: 0, y: 0, width: 560, height: 520)
 
         let newWindow = NSWindow(

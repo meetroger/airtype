@@ -28,7 +28,9 @@ struct FloatingView: View {
 
     // Sizes
     private let pillSize = Self.pillSize
-    private let expandedSize = Self.expandedSize
+    private var expandedSize: CGSize {
+        appState.isReviewing ? CGSize(width: 440, height: 440) : Self.expandedSize
+    }
     private let pillCornerRadius: CGFloat = 30
     private let expandedCornerRadius: CGFloat = 18
 
@@ -59,13 +61,16 @@ struct FloatingView: View {
         .ignoresSafeArea()
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
         .onTapGesture {
-            toggleExpanded()
+            if !isExpanded { toggleExpanded() }
         }
         .onHover { hovering in
             isHovering = hovering
         }
         .onChange(of: appState.isReviewing) { reviewing in
             if reviewing && !isExpanded { toggleExpanded() }
+        }
+        .onAppear {
+            if appState.isReviewing && !isExpanded { toggleExpanded() }
         }
         .onChange(of: appState.lastNotice) { notice in
             // Notices such as the explicit minimum-duration rejection should
@@ -335,7 +340,9 @@ struct FloatingView: View {
 
     private var resultExpandedView: some View {
         VStack(spacing: 12) {
-            if let error = appState.lastError {
+            if appState.isReviewing {
+                reviewExpandedView
+            } else if let error = appState.lastError {
                 // Error state
                 VStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -362,22 +369,6 @@ struct FloatingView: View {
                 }
                 .padding(20)
             } else {
-                if appState.isReviewing {
-                    HStack {
-                        Button("Save only") { Task { await appState.finishReview(insert: false) } }
-                        Button("Insert") { Task { await appState.finishReview(insert: true) } }
-                    }
-                    HStack {
-                        TextField("Misheard word", text: $appState.correctionToRemember)
-                        TextField("Correct word", text: $appState.correctionReplacement)
-                    }.textFieldStyle(.roundedBorder).padding(.horizontal, 16)
-                    HStack {
-                        Button("Remember correction") { appState.rememberCorrection() }
-                            .disabled(!appState.canRememberCorrection)
-                            .help("Edit the transcript, then enter the original and corrected word (up to 80 characters).")
-                        if appState.canUndoCorrection { Button("Undo learning") { appState.undoCorrection() } }
-                    }.font(.system(size: 11))
-                }
                 // Success - show transcription
                 TextEditor(text: $appState.partialTranscription)
                     .font(.system(size: 13))
@@ -392,6 +383,48 @@ struct FloatingView: View {
                     .padding(.top, 12)
             }
         }
+    }
+
+    private var reviewExpandedView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Insert returns to the original editor in \(appState.reviewDestination).")
+                .font(.system(size: 11))
+                .foregroundStyle(secondaryLabelColor)
+            if let error = appState.lastError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            TextEditor(text: $appState.partialTranscription)
+                .font(.system(size: 13))
+                .foregroundStyle(labelColor)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10).fill(quaternaryLabelColor))
+                .frame(minHeight: 90)
+            HStack {
+                Button("Save only") { Task { await appState.finishReview(insert: false) } }
+                Button("Copy & close") { Task { await appState.copyReview() } }
+                Spacer()
+                Button("Insert") { Task { await appState.finishReview(insert: true) } }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(appState.partialTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .help("Return to the original window, text field and selection, then paste. ⌘↩")
+            }
+            HStack {
+                TextField("Misheard word", text: $appState.correctionToRemember)
+                TextField("Correct word", text: $appState.correctionReplacement)
+            }.textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Remember correction") { appState.rememberCorrection() }
+                    .disabled(!appState.canRememberCorrection)
+                if appState.canUndoCorrection { Button("Undo learning") { appState.undoCorrection() } }
+            }.font(.system(size: 11))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
     }
 
     private var idleExpandedView: some View {
@@ -479,6 +512,8 @@ struct FloatingView: View {
             return "Recording"
         } else if appState.isProcessing {
             return appState.processingStage.isEmpty ? "Processing..." : appState.processingStage
+        } else if appState.isReviewing {
+            return "Review & insert"
         } else if appState.lastError != nil {
             return "Error"
         } else if appState.lastNotice != nil {

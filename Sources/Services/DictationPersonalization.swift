@@ -1,5 +1,29 @@
 import Foundation
 
+enum FloatingEscapeAction: Equatable {
+    case none, cancelRecording, cancelProcessing, saveReview, hide
+
+    static func resolve(visible: Bool, recording: Bool, processing: Bool, reviewing: Bool) -> Self {
+        guard visible else { return .none }
+        if recording { return .cancelRecording }
+        if reviewing { return .saveReview }
+        if processing { return .cancelProcessing }
+        return .hide
+    }
+}
+
+enum DictationSpelling {
+    /// Shared by cleanup, vocabulary alignment and translation, including
+    /// customized prompts. Spelling repetitions are not accidental stutters.
+    static let rules = """
+    SPOKEN LETTER SPELLING:
+    - When consecutive individually spoken Latin letters spell one intended word, product name or identifier, join them without spaces. For example, “看看 A R I O N 项目” becomes “看看 ARION 项目”, and “使用 A P I” becomes “使用 API”.
+    - Preserve every letter and its order, including repeated letters: “L L A M A 模型” becomes “LLAMA 模型”. Never remove repeated letters within a spelled word as stutters or filler.
+    - Use a matching preferred term's exact canonical casing and spacing when available (for example, “A R I O N” becomes “Arion” if Arion is a preferred term). Otherwise preserve the spelled letters' casing; do not guess a different spelling or expand an acronym.
+    - Preserve separate letters when the speaker is listing choices, teaching pronunciation, quoting the spaced spelling itself, or explicitly requesting spaces. Do not merge ordinary single-letter words in sentences such as “I am a developer”, letter lists such as “A, B, C”, mathematical variables, or code.
+    """
+}
+
 /// Explicit correction pairs are applied locally, once, without chaining.
 enum VocabularyCorrections {
     static func pairs(from source: String) -> [(String, String)] {

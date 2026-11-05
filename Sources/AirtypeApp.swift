@@ -237,6 +237,7 @@ final class StatusBarController: NSObject {
     }
 
     private func showPopover(relativeTo button: NSStatusBarButton) {
+        MainWindowController.shared.prepareHistoryTarget()
         let fittingSize = popover.contentViewController?.view.fittingSize ?? .zero
         if fittingSize.width > 0, fittingSize.height > 0 {
             popover.contentSize = fittingSize
@@ -317,6 +318,7 @@ class FloatingWindowManager: ObservableObject {
         }
 
         updateContent(with: appState)
+        panel?.setContentSize(FloatingView.pillSize)
         panel?.orderFront(nil)
         panel?.position(at: appState.settings.floatingWindowPosition, on: FocusedScreenLocator.current())
         isVisible = true
@@ -367,10 +369,14 @@ class FloatingWindowManager: ObservableObject {
     }
 
     func resignKeyAndActivatePreviousApp() {
-        panel?.resignKey()
-        panel?.becomesKeyOnlyIfNeeded = true
+        resignKey()
         previousApp?.activate()
         previousApp = nil
+    }
+
+    func resignKey() {
+        panel?.resignKey()
+        panel?.becomesKeyOnlyIfNeeded = true
     }
 
     private func createPanel(with appState: AppState) {
@@ -458,6 +464,8 @@ class AppState: ObservableObject {
     private var localDraftTask: Task<Void, Never>?
     private var localDraftSession = UUID()
     private var dictationTarget: DictationTarget?
+    private var reviewHistoryID: UUID?
+    var reviewDestination: String { dictationTarget?.applicationName ?? "original app" }
     @Published var activeScene: DictationScene = .chat
     @Published var isReviewing = false
     @Published var reviewOriginal = ""
@@ -500,9 +508,13 @@ class AppState: ObservableObject {
     }
 
     private var providerObserver: AnyCancellable?
+    private var floatingVisibilityObserver: AnyCancellable?
 
     init() {
         setupHotkeyCallbacks()
+        floatingVisibilityObserver = floatingWindowManager.$isVisible.sink { [weak self] visible in
+            self?.hotkeyManager.setEscapeEnabled(visible)
+        }
         MainWindowController.shared.hotkeyManager = hotkeyManager
         MainWindowController.shared.audioRecorder = audioRecorder
         Task { @MainActor in
@@ -520,6 +532,7 @@ class AppState: ObservableObject {
     }
 
     private func setupHotkeyCallbacks() {
+        hotkeyManager.onEscape = { [weak self] in self?.dismissFloatingWindow() }
         // Push-to-talk: start recording on key down
         hotkeyManager.onPushToTalkStart = { [weak self] in
             Task { @MainActor in
@@ -751,6 +764,7 @@ class AppState: ObservableObject {
         // event that arrives during startup still belongs to this recording.
         recordingMode = mode
         deliverySession = UUID()
+        reviewHistoryID = nil
 
         do {
             cursorContextTask?.cancel()
@@ -1063,8 +1077,7 @@ class AppState: ObservableObject {
             processingProgress = 0.0
             partialTranscription = ""
 
-            let manager = floatingWindowManager
-            Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
+            hideFloatingWindowAfterFeedback()
         } catch is CancellationError {
             debugLog("Streaming processing cancelled")
             return
@@ -1277,10 +1290,7 @@ class AppState: ObservableObject {
             transcriptionChunkInfo = ""
 
             // Hide floating window after successful insert (with delay for feedback)
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second
-                floatingWindowManager.hide()
-            }
+            hideFloatingWindowAfterFeedback()
         } catch is CancellationError {
             debugLog("Processing cancelled")
             return
@@ -1346,29 +1356,40 @@ class AppState: ObservableObject {
 
     private func deliver(text: String, reviewed: Bool = false) async throws -> Bool {
         if settings.reviewBeforeInsertion && !reviewed {
-            reviewOriginal = text
-            partialTranscription = text
-            correctionToRemember = ""
-            correctionReplacement = ""
-            isReviewing = true
-            floatingWindowManager.makeKeyable(true)
+            beginReview(text: text)
             return false
         }
-        // Save before attempting delivery; a posted paste cannot be verified or retried.
         partialTranscription = text
-        guard let target = dictationTarget else {
-            TranscriptionHistory.shared.save(text: text, inserted: false)
-            throw TextInsertionError.targetUnavailable
-        }
-        dictationTarget = nil // claim exactly once
+        let session = deliverySession
+        let historyID = reviewHistoryID
         do {
+            guard let target = dictationTarget else { throw TextInsertionError.targetUnavailable }
             try await textInserter.insert(text: text, target: target)
-            TranscriptionHistory.shared.save(text: text, inserted: true)
+            TranscriptionHistory.shared.save(text: text, inserted: true, id: historyID)
+            // Clipboard settling can outlive cancellation or a new recording.
+            // Record the posted paste without clearing that newer session.
+            guard session == deliverySession else { throw CancellationError() }
+            dictationTarget = nil // consume only after the paste was posted
+            reviewHistoryID = nil
             return true
         } catch {
-            TranscriptionHistory.shared.save(text: text, inserted: false)
+            if error is CancellationError { throw error }
+            guard session == deliverySession else { throw CancellationError() }
+            reviewHistoryID = TranscriptionHistory.shared.save(text: text, inserted: false, id: historyID).id
+            beginReview(text: text)
             throw error
         }
+    }
+
+    private func beginReview(text: String) {
+        if !isReviewing {
+            reviewOriginal = text
+            correctionToRemember = ""
+            correctionReplacement = ""
+        }
+        partialTranscription = text
+        isReviewing = true
+        floatingWindowManager.makeKeyable(true)
     }
 
     var canRememberCorrection: Bool {
@@ -1404,25 +1425,93 @@ class AppState: ObservableObject {
     }
 
     func finishReview(insert: Bool) async {
-        guard isReviewing else { return }
-        isReviewing = false
+        guard isReviewing, !isProcessing else { return }
         if insert {
             let session = deliverySession
             let text = partialTranscription
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             isProcessing = true
-            defer { if deliverySession == session { isProcessing = false } }
-            floatingWindowManager.resignKeyAndActivatePreviousApp()
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            guard session == deliverySession, !Task.isCancelled else { return }
-            do {
-                _ = try await deliver(text: text, reviewed: true)
-                floatingWindowManager.hide()
-            } catch { lastError = error.localizedDescription }
+            lastError = nil
+            lastNotice = nil
+            processingStage = "Returning to \(reviewDestination)..."
+            reviewHistoryID = TranscriptionHistory.shared.save(text: text, inserted: false, id: reviewHistoryID).id
+            defer {
+                if deliverySession == session {
+                    isProcessing = false
+                    processingTask = nil
+                }
+            }
+            floatingWindowManager.resignKey()
+            let insertionTask = Task { @MainActor in
+                do {
+                    guard let target = dictationTarget else { throw TextInsertionError.targetUnavailable }
+                    try await target.restoreFocus()
+                    guard session == deliverySession, !Task.isCancelled else { return }
+                    _ = try await deliver(text: text, reviewed: true)
+                    isReviewing = false
+                    lastError = nil
+                    partialTranscription = ""
+                    floatingWindowManager.hide()
+                } catch {
+                    guard session == deliverySession else { return }
+                    reviewHistoryID = TranscriptionHistory.shared.save(text: text, inserted: false, id: reviewHistoryID).id
+                    lastError = error.localizedDescription
+                    floatingWindowManager.makeKeyable(true)
+                }
+            }
+            processingTask = insertionTask
+            await insertionTask.value
         } else {
-            TranscriptionHistory.shared.save(text: partialTranscription, inserted: false)
+            TranscriptionHistory.shared.save(text: partialTranscription, inserted: false, id: reviewHistoryID)
+            reviewHistoryID = nil
             dictationTarget = nil
+            isReviewing = false
+            lastError = nil
             floatingWindowManager.resignKeyAndActivatePreviousApp()
             floatingWindowManager.hide()
+        }
+    }
+
+    func copyReview() async {
+        guard isReviewing, !isProcessing else { return }
+        let board = NSPasteboard.general
+        board.clearContents()
+        guard board.setString(partialTranscription, forType: .string) else {
+            lastError = TextInsertionError.clipboardUnavailable.localizedDescription
+            return
+        }
+        await finishReview(insert: false)
+    }
+
+    func dismissFloatingWindow() {
+        switch FloatingEscapeAction.resolve(visible: floatingWindowManager.isVisible,
+            recording: isRecording, processing: isProcessing, reviewing: isReviewing) {
+        case .none:
+            return
+        case .cancelRecording:
+            cancelRecording()
+        case .cancelProcessing:
+            cancelProcessing()
+        case .saveReview:
+            // Keep the edited draft even if Escape interrupts focus restoration.
+            TranscriptionHistory.shared.save(text: partialTranscription, inserted: false, id: reviewHistoryID)
+            cancelProcessing()
+            lastNotice = "Draft saved in History"
+        case .hide:
+            break
+        }
+        hotkeyManager.isToggleActive = false
+        floatingWindowManager.resignKeyAndActivatePreviousApp()
+        floatingWindowManager.hide()
+    }
+
+    private func hideFloatingWindowAfterFeedback() {
+        let session = deliverySession
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self, self.deliverySession == session,
+                  !self.isRecording, !self.isProcessing, !self.isReviewing else { return }
+            self.floatingWindowManager.hide()
         }
     }
 
@@ -1480,6 +1569,8 @@ class AppState: ObservableObject {
 
     func cancelRecording() {
         deliverySession = UUID()
+        isReviewing = false
+        reviewHistoryID = nil
         dictationTarget = nil
         cursorContextTask?.cancel()
         cursorContextTask = nil
@@ -1515,6 +1606,8 @@ class AppState: ObservableObject {
 
     func cancelProcessing() {
         deliverySession = UUID()
+        isReviewing = false
+        reviewHistoryID = nil
         dictationTarget = nil
         cursorContextTask?.cancel()
         cursorContextTask = nil
@@ -1549,8 +1642,7 @@ class AppState: ObservableObject {
         lastError = nil
         lastNotice = "Processing cancelled"
         systemAudioMuter.restore()
-        let manager = floatingWindowManager
-        Task { try? await Task.sleep(nanoseconds: 500_000_000); manager.hide() }
+        hideFloatingWindowAfterFeedback()
         // Re-establish streaming pre-connection if needed
         preconnectStreamingIfNeeded()
     }

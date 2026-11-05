@@ -7,6 +7,8 @@ struct DictationTarget {
     let application: NSRunningApplication
     let element: AXUIElement
     private let selection: CFTypeRef?
+    private let window: AXUIElement?
+    private let characterCount: Int?
 
     static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
@@ -25,8 +27,73 @@ struct DictationTarget {
         AXUIElementSetMessagingTimeout(element, 0.2)
         let role = attribute(element, kAXSubroleAttribute) as? String
         guard role != kAXSecureTextFieldSubrole else { throw TextInsertionError.secureField }
+        let windowValue = attribute(element, kAXWindowAttribute)
+        let window = windowValue.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
         return DictationTarget(application: app, element: element,
-                               selection: attribute(element, kAXSelectedTextRangeAttribute))
+                               selection: attribute(element, kAXSelectedTextRangeAttribute), window: window,
+                               characterCount: (attribute(element, kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue)
+    }
+
+    var applicationName: String { application.localizedName ?? "original app" }
+
+    /// Explicit Insert may return to the captured editor. Automatic delivery
+    /// never calls this: it must not steal focus while the user is working.
+    @MainActor
+    func restoreFocus() async throws {
+        guard AXIsProcessTrusted() else { throw TextInsertionError.noAccessibilityPermission }
+        guard !application.isTerminated,
+              Self.attribute(element, kAXRoleAttribute) != nil,
+              Self.attribute(element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole else {
+            throw TextInsertionError.targetUnavailable
+        }
+        try Task.checkCancellation()
+        guard application.activate() else { throw TextInsertionError.targetUnavailable }
+        // Wait for observed activation instead of assuming a fixed delay is enough.
+        for _ in 0..<28 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        try Task.checkCancellation()
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else {
+            throw TextInsertionError.targetChanged
+        }
+        if let window {
+            _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        }
+        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        // Restoring a field can be asynchronous in browser and Electron editors.
+        for _ in 0..<12 {
+            try Task.checkCancellation()
+            if focusMatches() { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        guard focusMatches() else { throw TextInsertionError.targetChanged }
+        if let selection, let current = Self.attribute(element, kAXSelectedTextRangeAttribute),
+           !CFEqual(selection, current) {
+            // A length change makes the old range unsafe to restore. Do not
+            // overwrite text at a stale offset after the document was edited.
+            if let characterCount,
+               (Self.attribute(element, kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue != characterCount {
+                throw TextInsertionError.targetChanged
+            }
+            guard AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, selection) == .success else {
+                throw TextInsertionError.targetChanged
+            }
+        }
+        try validate()
+    }
+
+    private func focusMatches() -> Bool {
+        guard !application.isTerminated,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,
+              let current = Self.attribute(AXUIElementCreateApplication(application.processIdentifier), kAXFocusedUIElementAttribute),
+              CFEqual(current, element) else { return false }
+        if let window {
+            guard let currentWindow = Self.attribute(AXUIElementCreateApplication(application.processIdentifier), kAXFocusedWindowAttribute),
+                  CFEqual(currentWindow, window) else { return false }
+        }
+        return Self.attribute(element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole
     }
 
     var isSearchField: Bool {
@@ -55,10 +122,7 @@ struct DictationTarget {
     }
 
     func validate() throws {
-        guard !application.isTerminated,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,
-              let current = Self.attribute(AXUIElementCreateApplication(application.processIdentifier), kAXFocusedUIElementAttribute),
-              CFEqual(current, element) else { throw TextInsertionError.targetChanged }
+        guard focusMatches() else { throw TextInsertionError.targetChanged }
         if let selection {
             guard let currentSelection = Self.attribute(element, kAXSelectedTextRangeAttribute),
                   CFEqual(selection, currentSelection) else { throw TextInsertionError.targetChanged }
@@ -166,7 +230,9 @@ class TextInserter {
         try simulatePaste()
 
         // Wait for paste to complete
-        try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        // Once Cmd+V is posted, cancellation must not turn this into a
+        // retryable failure and cause a duplicate paste.
+        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
 
         debugLog("Text insertion complete")
     }
@@ -210,7 +276,7 @@ enum TextInsertionError: LocalizedError {
         case .targetUnavailable:
             return "Focus an editor and enable Accessibility before recording."
         case .targetChanged:
-            return "The input target changed. Your text is saved in History for copying."
+            return "Could not return to the original editor. Your text is kept here; retry Insert or Copy it."
         case .secureField:
             return "Dictation is unavailable in password fields."
         case .noAccessibilityPermission:

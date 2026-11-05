@@ -10,3 +10,7 @@ xcrun swiftc -module-cache-path "$check_dir/cache" \
     Sources/Services/DictationPersonalization.swift Tests/PersonalizationChecks.swift \
     -o "$check_dir/checks"
 "$check_dir/checks"
+xcrun swiftc -module-cache-path "$check_dir/cache" \
+    Sources/Services/TranscriptionHistory.swift Tests/HistoryChecks.swift \
+    -o "$check_dir/history-checks"
+"$check_dir/history-checks"

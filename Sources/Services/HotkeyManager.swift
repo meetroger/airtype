@@ -14,10 +14,28 @@ class HotkeyManager: ObservableObject {
 
     private var pushToTalkHotKey: HotKey?
     private var toggleModeHotKey: HotKey?
+    private var escapeHotKey: HotKey?
+    private var isDisabled = false
 
     var onPushToTalkStart: (() -> Void)?
     var onPushToTalkEnd: (() -> Void)?
     var onToggle: (() -> Void)?
+    var onEscape: (() -> Void)?
+
+    /// Reserve bare Escape only while our floating UI is visible. Carbon
+    /// handles it even when the nonactivating panel leaves another app focused.
+    func setEscapeEnabled(_ enabled: Bool) {
+        guard enabled else {
+            escapeHotKey = nil
+            return
+        }
+        guard escapeHotKey == nil else { return }
+        escapeHotKey = HotKey(carbonKeyCode: UInt32(kVK_Escape), carbonModifiers: 0)
+        escapeHotKey?.isPaused = isDisabled
+        escapeHotKey?.keyDownHandler = { [weak self] in
+            Task { @MainActor in self?.onEscape?() }
+        }
+    }
 
     init() {
         setupHotkeys()
@@ -73,13 +91,17 @@ class HotkeyManager: ObservableObject {
     }
 
     func disable() {
+        isDisabled = true
         pushToTalkHotKey?.isPaused = true
         toggleModeHotKey?.isPaused = true
+        escapeHotKey?.isPaused = true
     }
 
     func enable() {
+        isDisabled = false
         pushToTalkHotKey?.isPaused = false
         toggleModeHotKey?.isPaused = false
+        escapeHotKey?.isPaused = false
     }
 
     private func updateDisplayStrings() {
