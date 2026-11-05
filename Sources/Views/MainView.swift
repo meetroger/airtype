@@ -665,6 +665,11 @@ struct MainView: View {
 
             SettingsCard {
                 VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Use nearby cursor text for spelling", isOn: $settings.cursorContextEnabled)
+                    Toggle("Allow cursor context to be sent to cloud AI", isOn: $settings.allowCloudContext)
+                        .disabled(!settings.cursorContextEnabled)
+                    Text("Reads up to 400 characters from the original editor, only for this recording. Cloud sharing is off by default. No screen capture or context history is collected.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                     Toggle("Local live drafts (MLX)", isOn: $settings.localDraftsEnabled)
                     Text("Updates recent speech every few seconds. Uses extra compute; final output always transcribes the complete recording.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)

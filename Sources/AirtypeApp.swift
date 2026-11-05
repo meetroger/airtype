@@ -453,6 +453,8 @@ class AppState: ObservableObject {
     let mlxTranscriptionService = MLXTranscriptionService()
     let enhancementService = EnhancementService()
     let textInserter = TextInserter()
+    private var deliverySession = UUID()
+    private var cursorContextTask: Task<String, Never>?
     private var localDraftTask: Task<Void, Never>?
     private var localDraftSession = UUID()
     private var dictationTarget: DictationTarget?
@@ -462,6 +464,7 @@ class AppState: ObservableObject {
     @Published var correctionToRemember = ""
     @Published var correctionReplacement = ""
     @Published var canUndoCorrection = false
+    private var learnedCorrectionPairs: String?
     private var previousCorrectionPairs: String?
     let systemAudioMuter = SystemAudioMuter()
     let hotkeyManager = HotkeyManager()
@@ -747,9 +750,20 @@ class AppState: ObservableObject {
         // Set the intent before awaiting microphone permission so a key-up
         // event that arrives during startup still belongs to this recording.
         recordingMode = mode
+        deliverySession = UUID()
 
         do {
+            cursorContextTask?.cancel()
+            cursorContextTask = nil
             dictationTarget = try DictationTarget.capture()
+            if settings.cursorContextEnabled,
+               (enhancementService.supportsLocalPrewarming || settings.allowCloudContext),
+               let target = dictationTarget {
+                cursorContextTask = Task.detached(priority: .utility) {
+                    guard !Task.isCancelled else { return "" }
+                    return target.readCursorContext()
+                }
+            }
             if let target = dictationTarget {
                 activeScene = DictationScene.resolve(choice: settings.dictationScene,
                     bundleID: target.application.bundleIdentifier ?? "", searchField: target.isSearchField,
@@ -789,6 +803,9 @@ class AppState: ObservableObject {
             prewarmLocalLLMIfNeeded(for: recordingMode ?? mode)
             floatingWindowManager.show(with: self)
         } catch {
+            cursorContextTask?.cancel()
+            cursorContextTask = nil
+            dictationTarget = nil
             debugLog("Failed to start recording: \(error)")
             recordingMode = nil
             lastError = error.localizedDescription
@@ -1085,6 +1102,8 @@ class AppState: ObservableObject {
         // Keep other audio muted through transcription/enhancement, and always
         // restore the exact prior output state on every completion path.
         defer {
+            cursorContextTask?.cancel()
+            cursorContextTask = nil
             cancelLocalLLMPrewarm()
             systemAudioMuter.restore()
         }
@@ -1352,21 +1371,34 @@ class AppState: ObservableObject {
         }
     }
 
-    func rememberCorrection() {
+    var canRememberCorrection: Bool {
         let heard = correctionToRemember.trimmingCharacters(in: .whitespacesAndNewlines)
         let correct = correctionReplacement.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard heard != correct, reviewOriginal.contains(heard), partialTranscription.contains(correct),
-              VocabularyCorrections.pairs(from: "\(heard) => \(correct)").count == 1 else { return }
+        return !heard.isEmpty && !correct.isEmpty && heard != correct
+            && heard.count <= 80 && correct.count <= 80
+            && !heard.contains("=>") && !correct.contains("=>")
+            && !heard.contains(where: { $0.isNewline }) && !correct.contains(where: { $0.isNewline })
+            && reviewOriginal.contains(heard) && partialTranscription.contains(correct)
+    }
+
+    func rememberCorrection() {
+        guard canRememberCorrection else { return }
+        let heard = correctionToRemember.trimmingCharacters(in: .whitespacesAndNewlines)
+        let correct = correctionReplacement.trimmingCharacters(in: .whitespacesAndNewlines)
         previousCorrectionPairs = settings.correctionPairs
         let retained = settings.correctionPairs.components(separatedBy: .newlines).filter {
             $0.components(separatedBy: "=>").first?.trimmingCharacters(in: .whitespaces) != heard
         }
         settings.correctionPairs = (["\(heard) => \(correct)"] + retained).joined(separator: "\n")
+        learnedCorrectionPairs = settings.correctionPairs
         canUndoCorrection = true
     }
 
     func undoCorrection() {
-        if let previousCorrectionPairs { settings.correctionPairs = previousCorrectionPairs }
+        if let previousCorrectionPairs, settings.correctionPairs == learnedCorrectionPairs {
+            settings.correctionPairs = previousCorrectionPairs
+        }
+        learnedCorrectionPairs = nil
         previousCorrectionPairs = nil
         canUndoCorrection = false
     }
@@ -1375,12 +1407,15 @@ class AppState: ObservableObject {
         guard isReviewing else { return }
         isReviewing = false
         if insert {
+            let session = deliverySession
+            let text = partialTranscription
             isProcessing = true
-            defer { isProcessing = false }
+            defer { if deliverySession == session { isProcessing = false } }
             floatingWindowManager.resignKeyAndActivatePreviousApp()
             try? await Task.sleep(nanoseconds: 200_000_000)
+            guard session == deliverySession, !Task.isCancelled else { return }
             do {
-                _ = try await deliver(text: partialTranscription, reviewed: true)
+                _ = try await deliver(text: text, reviewed: true)
                 floatingWindowManager.hide()
             } catch { lastError = error.localizedDescription }
         } else {
@@ -1398,6 +1433,8 @@ class AppState: ObservableObject {
 
     private func prepareFinalText(from rawTranscription: String, mode: RecordingMode) async throws -> String {
         let transcription = VocabularyCorrections.apply(rawTranscription, rules: settings.correctionPairs)
+        let context = await cursorContextTask?.value ?? ""
+        cursorContextTask = nil
         await waitForLocalLLMPrewarm(for: mode)
 
         if mode == .translateToTargetLanguage {
@@ -1408,7 +1445,7 @@ class AppState: ObservableObject {
             processingStage = "\(operation) to \(targetLanguage.rawValue)..."
             processingProgress = 0.75
             streamOutput("\n--- \(operation) to \(targetLanguage.rawValue)... ---")
-            let finalText = try await enhancementService.translate(text: transcription, to: targetLanguage)
+            let finalText = try await enhancementService.translate(text: transcription, to: targetLanguage, context: context)
             debugLog("\(targetLanguage.rawValue) result: \(finalText)")
             streamOutput("\n--- \(targetLanguage.rawValue) result ---")
             streamOutput(finalText)
@@ -1422,7 +1459,7 @@ class AppState: ObservableObject {
             processingStage = "Enhancing..."
             processingProgress = 0.75
             streamOutput("\n--- Enhancing text... ---")
-            finalText = try await enhancementService.enhance(text: finalText, scene: activeScene)
+            finalText = try await enhancementService.enhance(text: finalText, scene: activeScene, context: context)
             debugLog("Enhanced result: \(finalText)")
             streamOutput("\n--- Enhanced text ---")
             streamOutput(finalText)
@@ -1431,7 +1468,7 @@ class AppState: ObservableObject {
             processingStage = "Aligning terminology..."
             processingProgress = 0.75
             streamOutput("\n--- Aligning terminology... ---")
-            finalText = try await enhancementService.alignVocabulary(text: finalText)
+            finalText = try await enhancementService.alignVocabulary(text: finalText, context: context)
             debugLog("Vocabulary-aligned result: \(finalText)")
             streamOutput("\n--- Vocabulary-aligned text ---")
             streamOutput(finalText)
@@ -1442,6 +1479,10 @@ class AppState: ObservableObject {
     }
 
     func cancelRecording() {
+        deliverySession = UUID()
+        dictationTarget = nil
+        cursorContextTask?.cancel()
+        cursorContextTask = nil
         stopLocalDrafts()
         finishLocalASRPrewarm()
         cancelLocalLLMPrewarm()
@@ -1473,6 +1514,10 @@ class AppState: ObservableObject {
     }
 
     func cancelProcessing() {
+        deliverySession = UUID()
+        dictationTarget = nil
+        cursorContextTask?.cancel()
+        cursorContextTask = nil
         debugLog("Cancelling processing/enhancement")
         stopLocalDrafts()
         finishLocalASRPrewarm()

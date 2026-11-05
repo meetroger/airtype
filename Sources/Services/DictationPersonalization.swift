@@ -81,3 +81,11 @@ enum DictationScene: String, CaseIterable {
         }
     }
 }
+
+enum DictationContext {
+    static func sanitize(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.filter {
+            $0.value >= 32 || $0 == "\n" || $0 == "\t"
+        }).prefix(400))
+    }
+}

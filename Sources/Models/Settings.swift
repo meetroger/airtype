@@ -536,6 +536,13 @@ class Settings: ObservableObject {
         didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
     }
 
+    @Published var cursorContextEnabled = UserDefaults.standard.bool(forKey: "cursor_context_enabled") {
+        didSet { defaults.set(cursorContextEnabled, forKey: "cursor_context_enabled") }
+    }
+    @Published var allowCloudContext = UserDefaults.standard.bool(forKey: "allow_cloud_context") {
+        didSet { defaults.set(allowCloudContext, forKey: "allow_cloud_context") }
+    }
+
     @Published var localDraftsEnabled = UserDefaults.standard.bool(forKey: "local_drafts_enabled") {
         didSet { defaults.set(localDraftsEnabled, forKey: "local_drafts_enabled") }
     }

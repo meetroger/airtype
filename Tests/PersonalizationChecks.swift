@@ -13,6 +13,8 @@ struct PersonalizationChecks {
         assert(DictationScene.resolve(choice: "Chat", bundleID: "com.apple.mail", searchField: true, overrides: "") == .chat)
         assert(DictationScene.resolve(choice: "Automatic", bundleID: "app", searchField: true, overrides: "app => Email") == .email)
         assert(DictationScene.resolve(choice: "Automatic", bundleID: "app", searchField: true, overrides: "invalid") == .search)
+        assert(DictationContext.sanitize("a\u{0}b\nc\t") == "ab\nc\t")
+        assert(DictationContext.sanitize(String(repeating: "中", count: 500)).count == 400)
         print("Personalization checks passed")
     }
 }

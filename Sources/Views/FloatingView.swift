@@ -373,6 +373,8 @@ struct FloatingView: View {
                     }.textFieldStyle(.roundedBorder).padding(.horizontal, 16)
                     HStack {
                         Button("Remember correction") { appState.rememberCorrection() }
+                            .disabled(!appState.canRememberCorrection)
+                            .help("Edit the transcript, then enter the original and corrected word (up to 80 characters).")
                         if appState.canUndoCorrection { Button("Undo learning") { appState.undoCorrection() } }
                     }.font(.system(size: 11))
                 }

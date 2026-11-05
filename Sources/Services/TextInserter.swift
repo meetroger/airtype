@@ -22,6 +22,7 @@ struct DictationTarget {
             throw TextInsertionError.targetUnavailable
         }
         let element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.2)
         let role = attribute(element, kAXSubroleAttribute) as? String
         guard role != kAXSecureTextFieldSubrole else { throw TextInsertionError.secureField }
         return DictationTarget(application: app, element: element,
@@ -30,6 +31,27 @@ struct DictationTarget {
 
     var isSearchField: Bool {
         Self.attribute(element, kAXSubroleAttribute) as? String == "AXSearchField"
+    }
+
+    /// Request only a bounded range; never read the complete editor value.
+    func readCursorContext() -> String {
+        let denied = ["1password", "bitwarden", "lastpass", "keychain", "keepass", "dashlane", "passwords"]
+        let bundle = application.bundleIdentifier?.lowercased() ?? ""
+        guard !denied.contains(where: { bundle.contains($0) }),
+              Self.attribute(element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole,
+              let selection, CFGetTypeID(selection) == AXValueGetTypeID(),
+              let count = Self.attribute(element, kAXNumberOfCharactersAttribute) as? NSNumber else { return "" }
+        var cursor = CFRange()
+        guard AXValueGetValue(selection as! AXValue, .cfRange, &cursor), cursor.location >= 0,
+              cursor.location <= count.intValue else { return "" }
+        let start = max(0, cursor.location - 200)
+        var range = CFRange(location: start, length: min(400, count.intValue - start))
+        guard let rangeValue = AXValueCreate(.cfRange, &range) else { return "" }
+        var result: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element,
+            kAXStringForRangeParameterizedAttribute as CFString, rangeValue, &result) == .success,
+              let text = result as? String else { return "" }
+        return DictationContext.sanitize(text)
     }
 
     func validate() throws {
