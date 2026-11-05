@@ -294,7 +294,7 @@ struct FloatingView: View {
                     .foregroundStyle(.orange)
                     .padding(.top, 8)
                 } else {
-                    Text(appState.recordingMode?.recordingHint ?? "Recording")
+                    Text((appState.recordingMode?.recordingHint ?? "Recording") + " · " + appState.activeScene.rawValue)
                         .font(.system(size: 12))
                         .foregroundStyle(secondaryLabelColor)
                         .padding(.top, 8)

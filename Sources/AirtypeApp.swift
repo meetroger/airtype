@@ -454,6 +454,7 @@ class AppState: ObservableObject {
     let enhancementService = EnhancementService()
     let textInserter = TextInserter()
     private var dictationTarget: DictationTarget?
+    @Published var activeScene: DictationScene = .chat
     @Published var isReviewing = false
     @Published var reviewOriginal = ""
     @Published var correctionToRemember = ""
@@ -747,6 +748,11 @@ class AppState: ObservableObject {
 
         do {
             dictationTarget = try DictationTarget.capture()
+            if let target = dictationTarget {
+                activeScene = DictationScene.resolve(choice: settings.dictationScene,
+                    bundleID: target.application.bundleIdentifier ?? "", searchField: target.isSearchField,
+                    overrides: settings.appSceneOverrides)
+            }
             guard await audioRecorder.requestPermission() else {
                 throw RecordingError.noPermission
             }
@@ -1375,7 +1381,7 @@ class AppState: ObservableObject {
             processingStage = "Enhancing..."
             processingProgress = 0.75
             streamOutput("\n--- Enhancing text... ---")
-            finalText = try await enhancementService.enhance(text: finalText)
+            finalText = try await enhancementService.enhance(text: finalText, scene: activeScene)
             debugLog("Enhanced result: \(finalText)")
             streamOutput("\n--- Enhanced text ---")
             streamOutput(finalText)

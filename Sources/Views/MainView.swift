@@ -665,6 +665,15 @@ struct MainView: View {
 
             SettingsCard {
                 VStack(alignment: .leading, spacing: 8) {
+                    Picker("Output style", selection: $settings.dictationScene) {
+                        ForEach(DictationScene.allCases, id: \.rawValue) { scene in
+                            Text(scene.rawValue).tag(scene.rawValue)
+                        }
+                    }
+                    Text("App overrides: bundle identifier => Chat, Email, Search, or Coding / Prompt")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    TextEditor(text: $settings.appSceneOverrides)
+                        .font(.system(size: 11, design: .monospaced)).frame(height: 55)
                     Toggle("Review before inserting (with correction learning)", isOn: $settings.reviewBeforeInsertion)
                     Text("Local Correction Pairs").font(.system(size: 12, weight: .medium))
                     Text("One pair per line: misheard => correct. Exact, case-sensitive matches run locally before AI, even with enhancement off.")

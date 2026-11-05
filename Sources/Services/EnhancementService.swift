@@ -17,14 +17,14 @@ class EnhancementService {
 
     /// Correct transcription errors using GPT with timeout and error handling
     /// Preserves original speech while fixing ASR mistakes
-    func enhance(text: String) async throws -> String {
+    func enhance(text: String, scene: DictationScene = .chat) async throws -> String {
         guard settings.enhancementEnabled else {
             return text
         }
 
         return try await process(
             text: text,
-            prompt: enhancementPrompt,
+            prompt: enhancementPrompt + "\nOUTPUT SCENE RULES:\n" + scene.rules,
             operation: "Enhancement",
             skipVeryShortText: true
         )

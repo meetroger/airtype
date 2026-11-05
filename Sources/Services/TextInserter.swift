@@ -28,6 +28,10 @@ struct DictationTarget {
                                selection: attribute(element, kAXSelectedTextRangeAttribute))
     }
 
+    var isSearchField: Bool {
+        Self.attribute(element, kAXSubroleAttribute) as? String == "AXSearchField"
+    }
+
     func validate() throws {
         guard !application.isTerminated,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,

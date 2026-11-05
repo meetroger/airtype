@@ -536,6 +536,13 @@ class Settings: ObservableObject {
         didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
     }
 
+    @Published var dictationScene = UserDefaults.standard.string(forKey: "dictation_scene") ?? "Automatic" {
+        didSet { defaults.set(dictationScene, forKey: "dictation_scene") }
+    }
+    @Published var appSceneOverrides = UserDefaults.standard.string(forKey: "app_scene_overrides") ?? "" {
+        didSet { defaults.set(appSceneOverrides, forKey: "app_scene_overrides") }
+    }
+
     @Published var reviewBeforeInsertion = UserDefaults.standard.bool(forKey: "review_before_insertion") {
         didSet { defaults.set(reviewBeforeInsertion, forKey: "review_before_insertion") }
     }

@@ -8,6 +8,11 @@ struct PersonalizationChecks {
         assert(VocabularyCorrections.apply("foo_bar foo2 food foo", rules: rules) == "foo_bar foo2 food bar")
         assert(VocabularyCorrections.apply("hello", rules: " => bad\nhello => \nx => y => z") == "hello")
         assert(VocabularyCorrections.apply("foo", rules: "foo => first\nfoo => second") == "first")
+        assert(VocabularyCorrections.relevantTerms(["Airtype", "OpenAI", "无关"], in: "airtype uses openai") == ["Airtype", "OpenAI"])
+        assert(DictationScene.resolve(choice: "Automatic", bundleID: "com.apple.mail", searchField: false, overrides: "") == .email)
+        assert(DictationScene.resolve(choice: "Chat", bundleID: "com.apple.mail", searchField: true, overrides: "") == .chat)
+        assert(DictationScene.resolve(choice: "Automatic", bundleID: "app", searchField: true, overrides: "app => Email") == .email)
+        assert(DictationScene.resolve(choice: "Automatic", bundleID: "app", searchField: true, overrides: "invalid") == .search)
         print("Personalization checks passed")
     }
 }
