@@ -1284,7 +1284,8 @@ class AppState: ObservableObject {
         return "Recording skipped: \(measuredDuration) seconds is shorter than the 1-second minimum. No transcription or translation was performed."
     }
 
-    private func prepareFinalText(from transcription: String, mode: RecordingMode) async throws -> String {
+    private func prepareFinalText(from rawTranscription: String, mode: RecordingMode) async throws -> String {
+        let transcription = VocabularyCorrections.apply(rawTranscription, rules: settings.correctionPairs)
         await waitForLocalLLMPrewarm(for: mode)
 
         if mode == .translateToTargetLanguage {

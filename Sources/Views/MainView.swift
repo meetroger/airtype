@@ -664,6 +664,16 @@ struct MainView: View {
             }
 
             SettingsCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Local Correction Pairs").font(.system(size: 12, weight: .medium))
+                    Text("One pair per line: misheard => correct. Exact, case-sensitive matches run locally before AI, even with enhancement off.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    TextEditor(text: $settings.correctionPairs)
+                        .font(.system(size: 12, design: .monospaced)).frame(height: 90)
+                }
+            }
+
+            SettingsCard {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Custom Vocabulary")

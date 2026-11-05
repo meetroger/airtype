@@ -130,7 +130,7 @@ class EnhancementService {
         let systemPrompt = """
         \(transcriptIsolationRules)
 
-        \(preferredVocabularyRules)
+        \(preferredVocabularyRules(for: text))
 
         TASK-SPECIFIC RULES:
         \(prompt)
@@ -279,8 +279,8 @@ class EnhancementService {
         return prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
     }
 
-    private var preferredVocabularyRules: String {
-        let terms = settings.customVocabularyTerms
+    private func preferredVocabularyRules(for text: String) -> String {
+        let terms = VocabularyCorrections.relevantTerms(settings.customVocabularyTerms, in: text)
         guard !terms.isEmpty else { return "" }
 
         let encodedTerms = (try? JSONEncoder().encode(terms))

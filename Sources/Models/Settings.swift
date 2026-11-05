@@ -536,6 +536,10 @@ class Settings: ObservableObject {
         didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
     }
 
+    @Published var correctionPairs: String = UserDefaults.standard.string(forKey: "correction_pairs") ?? "" {
+        didSet { defaults.set(correctionPairs, forKey: "correction_pairs") }
+    }
+
     @Published var customVocabulary: String {
         didSet { defaults.set(customVocabulary, forKey: Keys.customVocabulary) }
     }
