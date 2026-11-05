@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
 /// Resolves the display containing the currently focused input control/window.
 /// Accessibility coordinates use Quartz's top-left origin, so compare them
@@ -98,6 +99,22 @@ enum FocusedScreenLocator {
 /// A floating panel that stays on top of all windows
 /// Styled like Raycast/Spotlight with dark minimal appearance
 class FloatingPanel: NSPanel {
+    /// Return true when this panel owns a pending review. Intercept Return
+    /// before NSTextView can turn it into a newline, but let IMEs commit first.
+    var onReviewInsert: (() -> Bool)?
+
+    override func sendEvent(_ event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+        if event.type == .keyDown,
+           event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter),
+           modifiers.isEmpty,
+           (firstResponder as? NSTextInputClient)?.hasMarkedText() != true,
+           let onReviewInsert {
+            if !event.isARepeat, onReviewInsert() { return }
+        }
+        super.sendEvent(event)
+    }
 
     init(contentRect: NSRect) {
         super.init(

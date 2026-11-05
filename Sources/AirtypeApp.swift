@@ -342,6 +342,11 @@ class FloatingWindowManager: ObservableObject {
         hostingView.layer?.isOpaque = false
 
         panel.contentView = hostingView
+        panel.onReviewInsert = { [weak appState] in
+            guard let appState, appState.isReviewing, !appState.isProcessing else { return false }
+            Task { await appState.finishReview(insert: true) }
+            return true
+        }
         panel.backgroundColor = NSColor.clear
         panel.applyRoundedMask()
     }
@@ -366,6 +371,7 @@ class FloatingWindowManager: ObservableObject {
             }
         }
         panel?.becomesKeyOnlyIfNeeded = !keyable
+        if keyable { panel?.makeKey() }
     }
 
     func resignKeyAndActivatePreviousApp() {

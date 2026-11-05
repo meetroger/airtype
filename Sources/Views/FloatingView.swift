@@ -390,6 +390,9 @@ struct FloatingView: View {
             Text("Insert returns to the original editor in \(appState.reviewDestination).")
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryLabelColor)
+            Text("Enter to insert · Shift+Enter for a new line")
+                .font(.system(size: 11))
+                .foregroundStyle(secondaryLabelColor)
             if let error = appState.lastError {
                 Text(error)
                     .font(.system(size: 11))
@@ -407,10 +410,10 @@ struct FloatingView: View {
                 Button("Save only") { Task { await appState.finishReview(insert: false) } }
                 Button("Copy & close") { Task { await appState.copyReview() } }
                 Spacer()
-                Button("Insert") { Task { await appState.finishReview(insert: true) } }
+                Button("Insert ↵") { Task { await appState.finishReview(insert: true) } }
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(appState.partialTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .help("Return to the original window, text field and selection, then paste. ⌘↩")
+                    .help("Enter to insert; Shift+Enter for a new line. ⌘↩ also inserts. Enter confirms an active input-method composition first.")
             }
             HStack {
                 TextField("Misheard word", text: $appState.correctionToRemember)
