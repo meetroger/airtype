@@ -345,7 +345,7 @@ class FloatingWindowManager: ObservableObject {
 
         panel.contentView = hostingView
         panel.onReviewInsert = { [weak appState] in
-            guard let appState, appState.isReviewing, !appState.isProcessing else { return false }
+            guard let appState, appState.isReviewing, appState.canInsertReview, !appState.isProcessing else { return false }
             Task { await appState.finishReview(insert: true) }
             return true
         }
@@ -472,9 +472,12 @@ class AppState: ObservableObject {
     private var localDraftTask: Task<Void, Never>?
     private var localDraftSession = UUID()
     private var dictationTarget: DictationTarget?
+    private var targetCaptureError: String?
     private var reviewHistoryID: UUID?
     private var sessionIsTranslation = false
     var reviewDestination: String { dictationTarget?.applicationName ?? "original app" }
+    var canInsertReview: Bool { dictationTarget != nil }
+    var reviewUsesWindowFallback: Bool { dictationTarget?.usesWindowFallback == true }
     @Published var activeScene: DictationScene = .chat
     @Published var isReviewing = false
     @Published var reviewOriginal = ""
@@ -498,6 +501,7 @@ class AppState: ObservableObject {
         task: Task<Void, Never>
     )?
     private var isStartingPushToTalk = false
+    private var isPreparingRecording = false
     private var pushToTalkReleasePending = false
     private var isStopRequested = false
     private var sharedShortcutHoldTask: Task<Void, Never>?
@@ -518,9 +522,19 @@ class AppState: ObservableObject {
 
     private var providerObserver: AnyCancellable?
     private var floatingVisibilityObserver: AnyCancellable?
+    private var focusActivationObserver: AnyCancellable?
 
     init() {
         setupHotkeyCallbacks()
+        focusActivationObserver = NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .sink { notification in
+                guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                Task.detached(priority: .utility) { DictationTarget.prepareAccessibility(for: app) }
+            }
+        if let app = NSWorkspace.shared.frontmostApplication {
+            Task.detached(priority: .utility) { DictationTarget.prepareAccessibility(for: app) }
+        }
         EditLearningTracker.shared.onLearned = { [weak self] in
             guard let self, !self.isRecording, !self.isProcessing, !self.isReviewing else { return }
             EditLearningNoticeController.shared.show()
@@ -757,7 +771,7 @@ class AppState: ObservableObject {
 
     func startRecording(mode: RecordingMode) async {
         debugLog("startRecording called, mode: \(mode)")
-        guard !isRecording && !isProcessing && !isReviewing else {
+        guard !isRecording && !isProcessing && !isReviewing && !isPreparingRecording else {
             debugLog("Already recording or processing, skipping")
             return
         }
@@ -780,12 +794,27 @@ class AppState: ObservableObject {
         sessionIsTranslation = mode == .translateToTargetLanguage
         recordingMode = mode
         deliverySession = UUID()
+        let session = deliverySession
         reviewHistoryID = nil
+        isPreparingRecording = true
+        defer { isPreparingRecording = false }
 
         do {
             cursorContextTask?.cancel()
             cursorContextTask = nil
-            dictationTarget = try DictationTarget.capture()
+            dictationTarget = nil
+            targetCaptureError = nil
+            activeScene = .chat
+            do {
+                dictationTarget = try await DictationTarget.captureForRecording()
+            } catch TextInsertionError.targetUnavailable {
+                targetCaptureError = TextInsertionError.targetUnavailable.localizedDescription
+            } catch TextInsertionError.noAccessibilityPermission {
+                targetCaptureError = TextInsertionError.noAccessibilityPermission.localizedDescription
+            }
+            // Editor inspection is optional. Unsupported browser AX providers
+            // must not prevent microphone capture; keep their output for review.
+            guard session == deliverySession else { return }
             if settings.cursorContextEnabled,
                (enhancementService.supportsLocalPrewarming || settings.allowCloudContext),
                let target = dictationTarget {
@@ -802,6 +831,7 @@ class AppState: ObservableObject {
             guard await audioRecorder.requestPermission() else {
                 throw RecordingError.noPermission
             }
+            guard session == deliverySession else { return }
 
             let selectedDeviceID = audioInputDeviceManager.deviceIDForRecording()
             if shouldUseStreaming {
@@ -825,7 +855,7 @@ class AppState: ObservableObject {
             isStopRequested = false
             recordingStartTime = Date()
             lastError = nil
-            lastNotice = nil
+            lastNotice = targetCaptureError == nil ? nil : "Original editor unavailable. Recording will be kept in the preview for copying."
             partialTranscription = ""
 
             startLocalDraftsIfNeeded()
@@ -833,6 +863,7 @@ class AppState: ObservableObject {
             prewarmLocalLLMIfNeeded(for: recordingMode ?? mode)
             floatingWindowManager.show(with: self)
         } catch {
+            guard session == deliverySession else { return }
             cursorContextTask?.cancel()
             cursorContextTask = nil
             dictationTarget = nil
@@ -1371,6 +1402,12 @@ class AppState: ObservableObject {
     }
 
     private func deliver(text: String, reviewed: Bool = false) async throws -> Bool {
+        if dictationTarget == nil {
+            reviewHistoryID = TranscriptionHistory.shared.save(text: text, inserted: false, id: reviewHistoryID).id
+            beginReview(text: text)
+            lastError = targetCaptureError ?? TextInsertionError.targetUnavailable.localizedDescription
+            return false
+        }
         if settings.reviewBeforeInsertion && !reviewed {
             beginReview(text: text)
             return false
@@ -1443,6 +1480,7 @@ class AppState: ObservableObject {
     func finishReview(insert: Bool) async {
         guard isReviewing, !isProcessing else { return }
         if insert {
+            guard canInsertReview else { return }
             let session = deliverySession
             let text = partialTranscription
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

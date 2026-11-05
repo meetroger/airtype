@@ -10,4 +10,4 @@ xcrun swiftc -module-cache-path "$check_dir/cache" \
     Sources/Services/DictationPersonalization.swift Sources/Services/EditLearning.swift \
     Sources/Services/EditLearningTracker.swift Sources/Services/TextInserter.swift \
     Tests/EditLearningNativeChecks.swift -o "$check_dir/edit-learning-native-checks"
-"$check_dir/edit-learning-native-checks"
+"$check_dir/edit-learning-native-checks" "$@"

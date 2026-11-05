@@ -79,9 +79,14 @@ struct EditLearningNativeChecks {
             app.setActivationPolicy(.accessory)
             Task { @MainActor in
                 do {
+                    if CommandLine.arguments.contains("--window-only") {
+                        try await runWindowFallbackCase()
+                        exit(0)
+                    }
                     try await runCase("please ask jason about the release", expected: .init(from: "jason", to: "Jayson"))
                     try await runCase("我想看看阿里昂项目的设置", expected: .init(from: "阿里昂", to: "Arion"))
                     try await runCase("please ask jason about the release", expected: .init(from: "jason", to: "Jayson"), enabled: false)
+                    try await runWindowFallbackCase()
                     print("Native edit learning checks passed (paste → AX observation → focus settlement → persisted learning → undo)")
                     exit(0)
                 } catch {
@@ -154,4 +159,55 @@ struct EditLearningNativeChecks {
     }
 
     private struct Failure: Error { let message: String }
+
+    @MainActor
+    private static func runWindowFallbackCase() async throws {
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        child.arguments = ["--fixture"]
+        try child.run()
+        defer { if child.isRunning { child.terminate() } }
+        let inserted = "Window fallback works without reading the editor"
+        var captured: DictationTarget?
+        for _ in 0..<100 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == child.processIdentifier,
+               let target = try? DictationTarget.capture(),
+               EditLearningField.capture(target: target, inserted: inserted) != nil {
+                captured = target; break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard let readable = captured, let field = EditLearningField.capture(target: readable, inserted: inserted) else {
+            throw Failure(message: "Window fallback fixture unavailable")
+        }
+        let target = try DictationTarget.captureWindowTarget(for: readable.application)
+        guard target.usesWindowFallback, target.element == nil, target.readCursorContext().isEmpty,
+              EditLearningField.capture(target: target, inserted: inserted) == nil else {
+            throw Failure(message: "Window-only delivery unexpectedly inspected editor contents")
+        }
+        try await TextInserter().insert(text: inserted, target: target, learnEdits: true)
+        var snapshot = field.snapshot()
+        for _ in 0..<20 {
+            if case .text(let pasted) = snapshot, pasted == "Before: " + inserted + "\n END" { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+            snapshot = field.snapshot()
+        }
+        guard case .text(let pasted) = snapshot, pasted == "Before: " + inserted + "\n END" else {
+            throw Failure(message: "Window-only paste did not reach the native editor: \(snapshot)")
+        }
+        kill(child.processIdentifier, SIGUSR2)
+        for _ in 0..<40 {
+            if !target.focusMatches() { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        let changeCount = NSPasteboard.general.changeCount
+        do {
+            try await TextInserter().insert(text: "MUST NOT PASTE INTO ANOTHER WINDOW", target: target)
+            throw Failure(message: "Window-only target followed another window")
+        } catch TextInsertionError.targetChanged {}
+        guard NSPasteboard.general.changeCount == changeCount else {
+            throw Failure(message: "Rejected window-only paste still changed clipboard")
+        }
+        print("Window fallback checks passed (no AX editor → real paste; changed window → refused)")
+    }
 }

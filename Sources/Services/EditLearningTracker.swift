@@ -20,8 +20,8 @@ final class EditLearningField: @unchecked Sendable {
 
     static func capture(target: DictationTarget, inserted: String) -> EditLearningField? {
         guard !inserted.isEmpty, inserted.utf16.count <= EditCorrectionExtractor.maxTextLength,
-              safe(target), target.focusMatches(),
-              let value = DictationTarget.attribute(target.element, kAXSelectedTextRangeAttribute),
+              safe(target), target.focusMatches(), let element = target.element,
+              let value = DictationTarget.attribute(element, kAXSelectedTextRangeAttribute),
               CFGetTypeID(value) == AXValueGetTypeID(),
               let count = count(target) else { return nil }
         var selection = CFRange()
@@ -56,22 +56,23 @@ final class EditLearningField: @unchecked Sendable {
     private static func safe(_ target: DictationTarget) -> Bool {
         let denied = ["1password", "bitwarden", "lastpass", "keychain", "keepass", "dashlane", "passwords"]
         let bundle = target.application.bundleIdentifier?.lowercased() ?? ""
-        guard AXIsProcessTrusted(), !IsSecureEventInputEnabled(), !target.application.isTerminated,
+        guard let element = target.element, AXIsProcessTrusted(), !IsSecureEventInputEnabled(), !target.application.isTerminated,
               !denied.contains(where: { bundle.contains($0) }),
-              DictationTarget.attribute(target.element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole,
-              (DictationTarget.attribute(target.element, "AXProtectedContent") as? Bool) != true,
-              let role = DictationTarget.attribute(target.element, kAXRoleAttribute) as? String else { return false }
+              DictationTarget.attribute(element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole,
+              (DictationTarget.attribute(element, "AXProtectedContent") as? Bool) != true,
+              let role = DictationTarget.attribute(element, kAXRoleAttribute) as? String else { return false }
         return role == kAXTextAreaRole || role == kAXTextFieldRole
     }
     private static func count(_ target: DictationTarget) -> Int? {
-        (DictationTarget.attribute(target.element, kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue
+        guard let element = target.element else { return nil }
+        return (DictationTarget.attribute(element, kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue
     }
     private static func read(_ target: DictationTarget, range: CFRange) -> String? {
-        guard range.length <= 4096 else { return nil }
+        guard let element = target.element, range.length <= 4096 else { return nil }
         var range = range
         guard let value = AXValueCreate(.cfRange, &range) else { return nil }
         var result: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(target.element,
+        guard AXUIElementCopyParameterizedAttributeValue(element,
             kAXStringForRangeParameterizedAttribute as CFString, value, &result) == .success else { return nil }
         return result as? String
     }

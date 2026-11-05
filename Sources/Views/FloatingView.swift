@@ -387,10 +387,14 @@ struct FloatingView: View {
 
     private var reviewExpandedView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Insert returns to the original editor in \(appState.reviewDestination).")
+            Text(appState.canInsertReview
+                ? (appState.reviewUsesWindowFallback
+                    ? "Insert uses the current cursor in the original \(appState.reviewDestination) window."
+                    : "Insert returns to the original editor in \(appState.reviewDestination).")
+                : "Use Copy & close, then paste into your editor.")
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryLabelColor)
-            Text("Enter to insert · Shift+Enter for a new line")
+            Text(appState.canInsertReview ? "Enter to insert · Shift+Enter for a new line" : "Your text is also saved in History.")
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryLabelColor)
             if let error = appState.lastError {
@@ -410,10 +414,12 @@ struct FloatingView: View {
                 Button("Save only") { Task { await appState.finishReview(insert: false) } }
                 Button("Copy & close") { Task { await appState.copyReview() } }
                 Spacer()
-                Button("Insert ↵") { Task { await appState.finishReview(insert: true) } }
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(appState.partialTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .help("Enter to insert; Shift+Enter for a new line. ⌘↩ also inserts. Enter confirms an active input-method composition first.")
+                if appState.canInsertReview {
+                    Button("Insert ↵") { Task { await appState.finishReview(insert: true) } }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(appState.partialTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .help("Enter to insert; Shift+Enter for a new line. ⌘↩ also inserts. Enter confirms an active input-method composition first.")
+                }
             }
             HStack {
                 TextField("Misheard word", text: $appState.correctionToRemember)
