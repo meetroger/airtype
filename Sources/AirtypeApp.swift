@@ -453,6 +453,7 @@ class AppState: ObservableObject {
     let mlxTranscriptionService = MLXTranscriptionService()
     let enhancementService = EnhancementService()
     let textInserter = TextInserter()
+    private var dictationTarget: DictationTarget?
     let systemAudioMuter = SystemAudioMuter()
     let hotkeyManager = HotkeyManager()
     let floatingWindowManager = FloatingWindowManager.shared
@@ -739,6 +740,7 @@ class AppState: ObservableObject {
         recordingMode = mode
 
         do {
+            dictationTarget = try DictationTarget.capture()
             guard await audioRecorder.requestPermission() else {
                 throw RecordingError.noPermission
             }
@@ -1011,8 +1013,7 @@ class AppState: ObservableObject {
             try Task.checkCancellation()
             processingProgress = 0.95
             if !finalText.isEmpty {
-                try await textInserter.insert(text: finalText)
-                TranscriptionHistory.shared.save(text: finalText, inserted: true)
+                try await deliver(text: finalText)
                 debugLog("Inserted text (\(finalText.count) chars)")
             }
             streamOutput("Done!\n")
@@ -1214,8 +1215,7 @@ class AppState: ObservableObject {
             debugLog("Inserting text...")
             streamOutput("\n--- Inserting at cursor ---")
             processingProgress = 0.95
-            try await textInserter.insert(text: finalText)
-            TranscriptionHistory.shared.save(text: finalText, inserted: true)
+            try await deliver(text: finalText)
             debugLog("Text inserted successfully")
             streamOutput("Done!\n")
             processingProgress = 1.0
@@ -1260,6 +1260,23 @@ class AppState: ObservableObject {
 
         transcriptionChunkInfo = ""
         debugLog("Processing complete")
+    }
+
+    private func deliver(text: String) async throws {
+        // Save before attempting delivery; a posted paste cannot be verified or retried.
+        partialTranscription = text
+        guard let target = dictationTarget else {
+            TranscriptionHistory.shared.save(text: text, inserted: false)
+            throw TextInsertionError.targetUnavailable
+        }
+        dictationTarget = nil // claim exactly once
+        do {
+            try await textInserter.insert(text: text, target: target)
+            TranscriptionHistory.shared.save(text: text, inserted: true)
+        } catch {
+            TranscriptionHistory.shared.save(text: text, inserted: false)
+            throw error
+        }
     }
 
     private func shortRecordingNotice(duration: TimeInterval) -> String {

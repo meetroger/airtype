@@ -2,6 +2,44 @@ import AppKit
 import Carbon.HIToolbox
 import ApplicationServices
 
+/// A recording owns one editor and selection. Never retarget a delayed result.
+struct DictationTarget {
+    let application: NSRunningApplication
+    let element: AXUIElement
+    private let selection: CFTypeRef?
+
+    static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value
+    }
+
+    static func capture() throws -> DictationTarget {
+        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let focused = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute),
+              CFGetTypeID(focused) == AXUIElementGetTypeID() else {
+            throw TextInsertionError.targetUnavailable
+        }
+        let element = focused as! AXUIElement
+        let role = attribute(element, kAXSubroleAttribute) as? String
+        guard role != kAXSecureTextFieldSubrole else { throw TextInsertionError.secureField }
+        return DictationTarget(application: app, element: element,
+                               selection: attribute(element, kAXSelectedTextRangeAttribute))
+    }
+
+    func validate() throws {
+        guard !application.isTerminated,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,
+              let current = Self.attribute(AXUIElementCreateApplication(application.processIdentifier), kAXFocusedUIElementAttribute),
+              CFEqual(current, element) else { throw TextInsertionError.targetChanged }
+        if let selection {
+            guard let currentSelection = Self.attribute(element, kAXSelectedTextRangeAttribute),
+                  CFEqual(selection, currentSelection) else { throw TextInsertionError.targetChanged }
+        }
+    }
+}
+
 /// Inserts text at the current cursor position using system paste
 class TextInserter {
 
@@ -45,7 +83,8 @@ class TextInserter {
 
     /// Insert text at current cursor position
     /// Uses clipboard + paste for reliable cross-app insertion
-    func insert(text: String) async throws {
+    func insert(text: String, target: DictationTarget) async throws {
+        try target.validate()
         debugLog("TextInserter.insert called with \(text.count) characters")
 
         // Check accessibility permission
@@ -96,7 +135,9 @@ class TextInserter {
 
         // Simulate Cmd+V paste
         debugLog("Simulating Cmd+V...")
-        simulatePaste()
+        try Task.checkCancellation()
+        try target.validate()
+        try simulatePaste()
 
         // Wait for paste to complete
         try await Task.sleep(nanoseconds: 200_000_000) // 200ms
@@ -104,20 +145,20 @@ class TextInserter {
         debugLog("Text insertion complete")
     }
 
-    private func simulatePaste() {
+    private func simulatePaste() throws {
         let source = CGEventSource(stateID: .hidSystemState)
 
         // Key down: Cmd+V
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true) else {
             debugLog("Failed to create keyDown event")
-            return
+            throw TextInsertionError.clipboardUnavailable
         }
         keyDown.flags = .maskCommand
 
         // Key up: Cmd+V
         guard let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
             debugLog("Failed to create keyUp event")
-            return
+            throw TextInsertionError.clipboardUnavailable
         }
         keyUp.flags = .maskCommand
 
@@ -134,11 +175,18 @@ class TextInserter {
 }
 
 enum TextInsertionError: LocalizedError {
+    case targetUnavailable, targetChanged, secureField
     case noAccessibilityPermission
     case clipboardUnavailable
 
     var errorDescription: String? {
         switch self {
+        case .targetUnavailable:
+            return "Focus an editor and enable Accessibility before recording."
+        case .targetChanged:
+            return "The input target changed. Your text is saved in History for copying."
+        case .secureField:
+            return "Dictation is unavailable in password fields."
         case .noAccessibilityPermission:
             return "Accessibility permission required. Please enable in System Settings → Privacy & Security → Accessibility"
         case .clipboardUnavailable:

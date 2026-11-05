@@ -26,6 +26,9 @@ struct TranscriptionHistoryView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
                                 Spacer()
+                                if entry.inserted {
+                                    Text("Paste sent").font(.system(size: 9)).foregroundStyle(.secondary)
+                                }
                                 if !entry.inserted {
                                     Text("Not inserted")
                                         .font(.system(size: 9, weight: .medium))
