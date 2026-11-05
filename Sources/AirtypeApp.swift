@@ -453,6 +453,8 @@ class AppState: ObservableObject {
     let mlxTranscriptionService = MLXTranscriptionService()
     let enhancementService = EnhancementService()
     let textInserter = TextInserter()
+    private var localDraftTask: Task<Void, Never>?
+    private var localDraftSession = UUID()
     private var dictationTarget: DictationTarget?
     @Published var activeScene: DictationScene = .chat
     @Published var isReviewing = false
@@ -782,6 +784,7 @@ class AppState: ObservableObject {
             lastNotice = nil
             partialTranscription = ""
 
+            startLocalDraftsIfNeeded()
             prewarmLocalASRIfNeeded()
             prewarmLocalLLMIfNeeded(for: recordingMode ?? mode)
             floatingWindowManager.show(with: self)
@@ -1076,6 +1079,7 @@ class AppState: ObservableObject {
             return
         }
         let mode = recordingMode ?? .transcribe
+        stopLocalDrafts()
         finishLocalASRPrewarm()
 
         // Keep other audio muted through transcription/enhancement, and always
@@ -1284,6 +1288,43 @@ class AppState: ObservableObject {
         debugLog("Processing complete")
     }
 
+    private func stopLocalDrafts() {
+        localDraftSession = UUID()
+        localDraftTask?.cancel()
+        localDraftTask = nil
+    }
+
+    private func startLocalDraftsIfNeeded() {
+        stopLocalDrafts()
+        guard settings.localDraftsEnabled, settings.transcriptionProvider == .localMLX else { return }
+        let session = localDraftSession
+        let model = settings.localMLXModel
+        let language = settings.localMLXLanguage
+        let compute = settings.localMLXComputeMode
+        let installed = Set(settings.localMLXInstalledModels)
+        localDraftTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 4_000_000_000)
+                    guard self.isRecording, self.localDraftSession == session else { return }
+                    guard let url = await self.audioRecorder.previewSnapshot() else { continue }
+                    defer { try? FileManager.default.removeItem(at: url) }
+                    try Task.checkCancellation()
+                    let text = try await self.mlxTranscriptionService.transcribe(audioURL: url,
+                        model: model, language: language, computeMode: compute, installedModelIDs: installed)
+                    try Task.checkCancellation()
+                    guard self.isRecording, self.localDraftSession == session else { return }
+                    self.partialTranscription = "Recent speech · draft\n" + text
+                } catch is CancellationError { return }
+                catch {
+                    // Drafts are optional; the full final transcription remains authoritative.
+                    return
+                }
+            }
+        }
+    }
+
     private func deliver(text: String, reviewed: Bool = false) async throws -> Bool {
         if settings.reviewBeforeInsertion && !reviewed {
             reviewOriginal = text
@@ -1401,6 +1442,7 @@ class AppState: ObservableObject {
     }
 
     func cancelRecording() {
+        stopLocalDrafts()
         finishLocalASRPrewarm()
         cancelLocalLLMPrewarm()
         if shouldUseStreaming {
@@ -1432,6 +1474,7 @@ class AppState: ObservableObject {
 
     func cancelProcessing() {
         debugLog("Cancelling processing/enhancement")
+        stopLocalDrafts()
         finishLocalASRPrewarm()
         cancelLocalLLMPrewarm()
         processingTask?.cancel()

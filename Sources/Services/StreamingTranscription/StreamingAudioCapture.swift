@@ -133,6 +133,31 @@ class StreamingAudioCapture {
         }
     }
 
+    /// A bounded, independent WAV snapshot. Never decode the file being written.
+    func previewSnapshot() async -> URL? {
+        await withCheckedContinuation { continuation in
+            recordingQueue.async { [weak self] in
+                guard let self, let source = self.recordingURL, self.recordedByteCount >= 32_000 else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                do {
+                    let input = try FileHandle(forReadingFrom: source)
+                    defer { try? input.close() }
+                    let byteCount = min(self.recordedByteCount, 20 * 32_000)
+                    try input.seek(toOffset: 44 + self.recordedByteCount - byteCount)
+                    let pcm = try input.read(upToCount: Int(byteCount)) ?? Data()
+                    guard !pcm.isEmpty else { continuation.resume(returning: nil); return }
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("airtype-draft-\(UUID()).wav")
+                    var data = Self.wavHeader(dataByteCount: UInt64(pcm.count))
+                    data.append(pcm)
+                    try data.write(to: url, options: .atomic)
+                    continuation.resume(returning: url)
+                } catch { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
     @discardableResult
     func stop(discard: Bool = false) -> URL? {
         if tapInstalled {

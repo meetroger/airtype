@@ -536,6 +536,10 @@ class Settings: ObservableObject {
         didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
     }
 
+    @Published var localDraftsEnabled = UserDefaults.standard.bool(forKey: "local_drafts_enabled") {
+        didSet { defaults.set(localDraftsEnabled, forKey: "local_drafts_enabled") }
+    }
+
     @Published var dictationScene = UserDefaults.standard.string(forKey: "dictation_scene") ?? "Automatic" {
         didSet { defaults.set(dictationScene, forKey: "dictation_scene") }
     }

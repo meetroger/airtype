@@ -144,7 +144,9 @@ enum MLXAudioRunner {
         let audioURL = URL(fileURLWithPath: audioPath)
         let (_, audio) = try loadAudioArray(from: audioURL, sampleRate: 16_000)
         let model = try await qwenModel(for: modelID)
+        try Task.checkCancellation()
         let output = model.generate(audio: audio, language: normalizeLanguage(languageCode))
+        try Task.checkCancellation()
         let text = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             throw LocalMLXTranscriptionError.emptyRecording

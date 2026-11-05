@@ -227,6 +227,10 @@ class AudioRecorder: NSObject, ObservableObject {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    func previewSnapshot() async -> URL? {
+        await audioCapture?.previewSnapshot()
+    }
+
     func stopRecording() async throws -> URL? {
         let wavURL = audioCapture?.stop()
         audioCapture = nil

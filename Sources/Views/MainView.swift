@@ -665,6 +665,9 @@ struct MainView: View {
 
             SettingsCard {
                 VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Local live drafts (MLX)", isOn: $settings.localDraftsEnabled)
+                    Text("Updates recent speech every few seconds. Uses extra compute; final output always transcribes the complete recording.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                     Picker("Output style", selection: $settings.dictationScene) {
                         ForEach(DictationScene.allCases, id: \.rawValue) { scene in
                             Text(scene.rawValue).tag(scene.rawValue)
