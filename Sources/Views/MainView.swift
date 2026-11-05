@@ -665,6 +665,7 @@ struct MainView: View {
 
             SettingsCard {
                 VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Review before inserting (with correction learning)", isOn: $settings.reviewBeforeInsertion)
                     Text("Local Correction Pairs").font(.system(size: 12, weight: .medium))
                     Text("One pair per line: misheard => correct. Exact, case-sensitive matches run locally before AI, even with enhancement off.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)

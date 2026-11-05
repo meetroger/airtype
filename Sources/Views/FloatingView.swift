@@ -64,6 +64,9 @@ struct FloatingView: View {
         .onHover { hovering in
             isHovering = hovering
         }
+        .onChange(of: appState.isReviewing) { reviewing in
+            if reviewing && !isExpanded { toggleExpanded() }
+        }
         .onChange(of: appState.lastNotice) { notice in
             // Notices such as the explicit minimum-duration rejection should
             // be visible immediately instead of being hidden behind the pill.
@@ -359,6 +362,20 @@ struct FloatingView: View {
                 }
                 .padding(20)
             } else {
+                if appState.isReviewing {
+                    HStack {
+                        Button("Save only") { Task { await appState.finishReview(insert: false) } }
+                        Button("Insert") { Task { await appState.finishReview(insert: true) } }
+                    }
+                    HStack {
+                        TextField("Misheard word", text: $appState.correctionToRemember)
+                        TextField("Correct word", text: $appState.correctionReplacement)
+                    }.textFieldStyle(.roundedBorder).padding(.horizontal, 16)
+                    HStack {
+                        Button("Remember correction") { appState.rememberCorrection() }
+                        if appState.canUndoCorrection { Button("Undo learning") { appState.undoCorrection() } }
+                    }.font(.system(size: 11))
+                }
                 // Success - show transcription
                 TextEditor(text: $appState.partialTranscription)
                     .font(.system(size: 13))

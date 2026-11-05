@@ -536,6 +536,10 @@ class Settings: ObservableObject {
         didSet { defaults.set(enhancementPrompt, forKey: Keys.enhancementPrompt) }
     }
 
+    @Published var reviewBeforeInsertion = UserDefaults.standard.bool(forKey: "review_before_insertion") {
+        didSet { defaults.set(reviewBeforeInsertion, forKey: "review_before_insertion") }
+    }
+
     @Published var correctionPairs: String = UserDefaults.standard.string(forKey: "correction_pairs") ?? "" {
         didSet { defaults.set(correctionPairs, forKey: "correction_pairs") }
     }

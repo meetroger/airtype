@@ -454,6 +454,12 @@ class AppState: ObservableObject {
     let enhancementService = EnhancementService()
     let textInserter = TextInserter()
     private var dictationTarget: DictationTarget?
+    @Published var isReviewing = false
+    @Published var reviewOriginal = ""
+    @Published var correctionToRemember = ""
+    @Published var correctionReplacement = ""
+    @Published var canUndoCorrection = false
+    private var previousCorrectionPairs: String?
     let systemAudioMuter = SystemAudioMuter()
     let hotkeyManager = HotkeyManager()
     let floatingWindowManager = FloatingWindowManager.shared
@@ -719,7 +725,7 @@ class AppState: ObservableObject {
 
     func startRecording(mode: RecordingMode) async {
         debugLog("startRecording called, mode: \(mode)")
-        guard !isRecording && !isProcessing else {
+        guard !isRecording && !isProcessing && !isReviewing else {
             debugLog("Already recording or processing, skipping")
             return
         }
@@ -1013,7 +1019,12 @@ class AppState: ObservableObject {
             try Task.checkCancellation()
             processingProgress = 0.95
             if !finalText.isEmpty {
-                try await deliver(text: finalText)
+                if !(try await deliver(text: finalText)) {
+                    isProcessing = false
+                    recordingMode = nil
+                    processingStage = ""
+                    return
+                }
                 debugLog("Inserted text (\(finalText.count) chars)")
             }
             streamOutput("Done!\n")
@@ -1215,7 +1226,12 @@ class AppState: ObservableObject {
             debugLog("Inserting text...")
             streamOutput("\n--- Inserting at cursor ---")
             processingProgress = 0.95
-            try await deliver(text: finalText)
+            if !(try await deliver(text: finalText)) {
+                    isProcessing = false
+                    recordingMode = nil
+                    processingStage = ""
+                    return
+                }
             debugLog("Text inserted successfully")
             streamOutput("Done!\n")
             processingProgress = 1.0
@@ -1262,7 +1278,16 @@ class AppState: ObservableObject {
         debugLog("Processing complete")
     }
 
-    private func deliver(text: String) async throws {
+    private func deliver(text: String, reviewed: Bool = false) async throws -> Bool {
+        if settings.reviewBeforeInsertion && !reviewed {
+            reviewOriginal = text
+            partialTranscription = text
+            correctionToRemember = ""
+            correctionReplacement = ""
+            isReviewing = true
+            floatingWindowManager.makeKeyable(true)
+            return false
+        }
         // Save before attempting delivery; a posted paste cannot be verified or retried.
         partialTranscription = text
         guard let target = dictationTarget else {
@@ -1273,9 +1298,49 @@ class AppState: ObservableObject {
         do {
             try await textInserter.insert(text: text, target: target)
             TranscriptionHistory.shared.save(text: text, inserted: true)
+            return true
         } catch {
             TranscriptionHistory.shared.save(text: text, inserted: false)
             throw error
+        }
+    }
+
+    func rememberCorrection() {
+        let heard = correctionToRemember.trimmingCharacters(in: .whitespacesAndNewlines)
+        let correct = correctionReplacement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard heard != correct, reviewOriginal.contains(heard), partialTranscription.contains(correct),
+              VocabularyCorrections.pairs(from: "\(heard) => \(correct)").count == 1 else { return }
+        previousCorrectionPairs = settings.correctionPairs
+        let retained = settings.correctionPairs.components(separatedBy: .newlines).filter {
+            $0.components(separatedBy: "=>").first?.trimmingCharacters(in: .whitespaces) != heard
+        }
+        settings.correctionPairs = (["\(heard) => \(correct)"] + retained).joined(separator: "\n")
+        canUndoCorrection = true
+    }
+
+    func undoCorrection() {
+        if let previousCorrectionPairs { settings.correctionPairs = previousCorrectionPairs }
+        previousCorrectionPairs = nil
+        canUndoCorrection = false
+    }
+
+    func finishReview(insert: Bool) async {
+        guard isReviewing else { return }
+        isReviewing = false
+        if insert {
+            isProcessing = true
+            defer { isProcessing = false }
+            floatingWindowManager.resignKeyAndActivatePreviousApp()
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            do {
+                _ = try await deliver(text: partialTranscription, reviewed: true)
+                floatingWindowManager.hide()
+            } catch { lastError = error.localizedDescription }
+        } else {
+            TranscriptionHistory.shared.save(text: partialTranscription, inserted: false)
+            dictationTarget = nil
+            floatingWindowManager.resignKeyAndActivatePreviousApp()
+            floatingWindowManager.hide()
         }
     }
 
