@@ -44,6 +44,8 @@
 		A10021000000000000000021 /* SystemAudioMuter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20021000000000000000021 /* SystemAudioMuter.swift */; };
 		A10022000000000000000022 /* AudioInputDeviceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20022000000000000000022 /* AudioInputDeviceManager.swift */; };
 		B10000000000000000000001 = {isa = PBXBuildFile; fileRef = B20000000000000000000001; };
+        B10000000000000000000002 = {isa = PBXBuildFile; fileRef = B20000000000000000000002; };
+        B10000000000000000000003 = {isa = PBXBuildFile; fileRef = B20000000000000000000003; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +86,8 @@
 		A20017000000000000000017 /* StreamingAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingAudioCapture.swift; sourceTree = "<group>"; };
 		A20018000000000000000018 /* DoubaoStreamingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubaoStreamingService.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationPersonalization.swift; sourceTree = "<group>"; };
+        B20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditLearning.swift; sourceTree = "<group>"; };
+        B20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditLearningTracker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -159,6 +163,8 @@
 				A20010000000000000000010 /* SettingsWindowController.swift */,
 				A20011000000000000000011 /* TextInserter.swift */,
 				B20000000000000000000001,
+                B20000000000000000000002,
+                B20000000000000000000003,
 				A20019000000000000000019 /* TranscriptionHistory.swift */,
 				A2001B00000000000000001B /* MLXTranscriptionService.swift */,
 				A2001C00000000000000001C /* LocalModelManager.swift */,
@@ -290,6 +296,8 @@
 				A10010000000000000000010 /* SettingsWindowController.swift in Sources */,
 				A10011000000000000000011 /* TextInserter.swift in Sources */,
 				B10000000000000000000001,
+                B10000000000000000000002,
+                B10000000000000000000003,
 				A10019000000000000000019 /* TranscriptionHistory.swift in Sources */,
 				A1001B00000000000000001B /* MLXTranscriptionService.swift in Sources */,
 				A1001C00000000000000001C /* LocalModelManager.swift in Sources */,

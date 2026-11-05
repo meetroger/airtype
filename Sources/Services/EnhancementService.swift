@@ -134,10 +134,11 @@ class EnhancementService {
         let transcriptData = try JSONEncoder().encode(TranscriptInput(transcript: text,
             referenceContext: allowedContext.isEmpty ? nil : allowedContext))
         let transcriptJSON = String(decoding: transcriptData, as: UTF8.self)
+        let learnedTerms = await MainActor.run { EditLearningStore.shared.entries.map { $0.pair.to } }
         let systemPrompt = """
         \(transcriptIsolationRules)
 
-        \(preferredVocabularyRules(for: text))
+        \(preferredVocabularyRules(for: text, learnedTerms: learnedTerms))
 
         \(DictationSpelling.rules)
 
@@ -292,8 +293,8 @@ class EnhancementService {
         return prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
     }
 
-    private func preferredVocabularyRules(for text: String) -> String {
-        let terms = VocabularyCorrections.relevantTerms(settings.customVocabularyTerms, in: text)
+    private func preferredVocabularyRules(for text: String, learnedTerms: [String]) -> String {
+        let terms = VocabularyCorrections.relevantTerms(settings.customVocabularyTerms + learnedTerms, in: text)
         guard !terms.isEmpty else { return "" }
 
         let encodedTerms = (try? JSONEncoder().encode(terms))

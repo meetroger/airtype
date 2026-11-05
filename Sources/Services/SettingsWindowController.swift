@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Settings window now redirects to the main dashboard window.
+@MainActor
 class SettingsWindowController {
     static let shared = SettingsWindowController()
 

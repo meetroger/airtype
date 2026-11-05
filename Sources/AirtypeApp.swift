@@ -135,6 +135,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        EditLearningTracker.shared.settle()
+        EditLearningNoticeController.shared.hide()
         statusBarController = nil
         appState = nil
     }
@@ -471,6 +473,7 @@ class AppState: ObservableObject {
     private var localDraftSession = UUID()
     private var dictationTarget: DictationTarget?
     private var reviewHistoryID: UUID?
+    private var sessionIsTranslation = false
     var reviewDestination: String { dictationTarget?.applicationName ?? "original app" }
     @Published var activeScene: DictationScene = .chat
     @Published var isReviewing = false
@@ -518,6 +521,10 @@ class AppState: ObservableObject {
 
     init() {
         setupHotkeyCallbacks()
+        EditLearningTracker.shared.onLearned = { [weak self] in
+            guard let self, !self.isRecording, !self.isProcessing, !self.isReviewing else { return }
+            EditLearningNoticeController.shared.show()
+        }
         floatingVisibilityObserver = floatingWindowManager.$isVisible.sink { [weak self] visible in
             self?.hotkeyManager.setEscapeEnabled(visible)
         }
@@ -768,6 +775,9 @@ class AppState: ObservableObject {
 
         // Set the intent before awaiting microphone permission so a key-up
         // event that arrives during startup still belongs to this recording.
+        EditLearningTracker.shared.settle()
+        EditLearningNoticeController.shared.hide()
+        sessionIsTranslation = mode == .translateToTargetLanguage
         recordingMode = mode
         deliverySession = UUID()
         reviewHistoryID = nil
@@ -1370,7 +1380,7 @@ class AppState: ObservableObject {
         let historyID = reviewHistoryID
         do {
             guard let target = dictationTarget else { throw TextInsertionError.targetUnavailable }
-            try await textInserter.insert(text: text, target: target)
+            try await textInserter.insert(text: text, target: target, learnEdits: !sessionIsTranslation)
             TranscriptionHistory.shared.save(text: text, inserted: true, id: historyID)
             // Clipboard settling can outlive cancellation or a new recording.
             // Record the posted paste without clearing that newer session.
@@ -1527,7 +1537,9 @@ class AppState: ObservableObject {
     }
 
     private func prepareFinalText(from rawTranscription: String, mode: RecordingMode) async throws -> String {
-        let transcription = VocabularyCorrections.apply(rawTranscription, rules: settings.correctionPairs)
+        sessionIsTranslation = mode == .translateToTargetLanguage
+        let rules = settings.correctionPairs + "\n" + EditLearningStore.shared.rules
+        let transcription = VocabularyCorrections.apply(rawTranscription, rules: rules)
         let context = await cursorContextTask?.value ?? ""
         cursorContextTask = nil
         await waitForLocalLLMPrewarm(for: mode)

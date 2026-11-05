@@ -562,6 +562,10 @@ class Settings: ObservableObject {
         didSet { defaults.set(correctionPairs, forKey: "correction_pairs") }
     }
 
+    @Published var automaticEditLearningEnabled: Bool = UserDefaults.standard.object(forKey: "automatic_edit_learning_enabled") as? Bool ?? true {
+        didSet { defaults.set(automaticEditLearningEnabled, forKey: "automatic_edit_learning_enabled") }
+    }
+
     @Published var customVocabulary: String {
         didSet { defaults.set(customVocabulary, forKey: Keys.customVocabulary) }
     }

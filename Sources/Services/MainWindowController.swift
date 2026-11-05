@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Manages the main dashboard window as a separate NSWindow
+@MainActor
 class MainWindowController {
     static let shared = MainWindowController()
 
@@ -85,6 +86,7 @@ class MainWindowController {
     }
 
     func showHistory() {
+        EditLearningTracker.shared.settle()
         if let current = try? DictationTarget.capture() { historyTarget = current }
         let target = historyTarget
         historyTarget = nil

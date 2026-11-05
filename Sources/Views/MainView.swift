@@ -84,6 +84,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 }
 
 struct MainView: View {
+    @ObservedObject private var editLearning = EditLearningStore.shared
     @ObservedObject var settings: Settings
     @ObservedObject var hotkeyManager: HotkeyManager
     @ObservedObject var audioRecorder: AudioRecorder
@@ -683,6 +684,41 @@ struct MainView: View {
                     TextEditor(text: $settings.appSceneOverrides)
                         .font(.system(size: 11, design: .monospaced)).frame(height: 55)
                     Toggle("Review before inserting (with correction learning)", isOn: $settings.reviewBeforeInsertion)
+                    Toggle("Learn corrections made after insertion", isOn: $settings.automaticEditLearningEnabled)
+                    Text("Remembers short word corrections you make in the original editor. Learning stays on this Mac. An Undo notice appears after you stop editing or leave the field. Translation is excluded.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    if editLearning.canUndo {
+                        Button("Undo last learned correction") {
+                            EditLearningTracker.shared.abandon()
+                            editLearning.undoLast()
+                            EditLearningNoticeController.shared.hide()
+                        }
+                    }
+                    if !editLearning.entries.isEmpty {
+                        Text("Automatically learned (\(editLearning.entries.count))")
+                            .font(.system(size: 12, weight: .medium))
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(editLearning.entries) { entry in
+                                    HStack {
+                                        Text("\(entry.pair.from) → \(entry.pair.to)")
+                                            .font(.system(size: 11)).textSelection(.enabled)
+                                        Spacer()
+                                        Button("Remove") {
+                                            EditLearningTracker.shared.abandon()
+                                            editLearning.remove(entry.id)
+                                            EditLearningNoticeController.shared.hide()
+                                        }.controlSize(.small)
+                                    }
+                                }
+                            }
+                        }.frame(maxHeight: 150)
+                        Button("Clear learned corrections") {
+                            EditLearningTracker.shared.abandon()
+                            editLearning.clear()
+                            EditLearningNoticeController.shared.hide()
+                        }.controlSize(.small)
+                    }
                     Text("Local Correction Pairs").font(.system(size: 12, weight: .medium))
                     Text("One pair per line: misheard => correct. Exact, case-sensitive matches run locally before AI, even with enhancement off.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)

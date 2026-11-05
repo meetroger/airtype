@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MenuBarView: View {
+    @ObservedObject private var editLearning = EditLearningStore.shared
     @ObservedObject var appState: AppState
     @ObservedObject private var hotkeyManager: HotkeyManager
     @ObservedObject private var audioInputDeviceManager: AudioInputDeviceManager
@@ -210,6 +211,13 @@ struct MenuBarView: View {
                 .padding(.vertical, 4)
 
             // Menu items
+            if editLearning.canUndo {
+                MenuButton(title: "Undo last learned correction", shortcut: nil) {
+                    EditLearningTracker.shared.abandon()
+                    editLearning.undoLast()
+                    EditLearningNoticeController.shared.hide()
+                }
+            }
             MenuButton(title: "Recent Transcriptions", shortcut: nil) {
                 MainWindowController.shared.showHistory()
             }

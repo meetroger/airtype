@@ -19,7 +19,7 @@ struct DictationTarget {
     static func capture() throws -> DictationTarget {
         guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-              let focused = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute),
+              let focused = attribute(applicationElement(app), kAXFocusedUIElementAttribute),
               CFGetTypeID(focused) == AXUIElementGetTypeID() else {
             throw TextInsertionError.targetUnavailable
         }
@@ -29,6 +29,7 @@ struct DictationTarget {
         guard role != kAXSecureTextFieldSubrole else { throw TextInsertionError.secureField }
         let windowValue = attribute(element, kAXWindowAttribute)
         let window = windowValue.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
+        if let window { AXUIElementSetMessagingTimeout(window, 0.2) }
         return DictationTarget(application: app, element: element,
                                selection: attribute(element, kAXSelectedTextRangeAttribute), window: window,
                                characterCount: (attribute(element, kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue)
@@ -84,16 +85,23 @@ struct DictationTarget {
         try validate()
     }
 
-    private func focusMatches() -> Bool {
+    func focusMatches() -> Bool {
+        let app = Self.applicationElement(application)
         guard !application.isTerminated,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,
-              let current = Self.attribute(AXUIElementCreateApplication(application.processIdentifier), kAXFocusedUIElementAttribute),
+              let current = Self.attribute(app, kAXFocusedUIElementAttribute),
               CFEqual(current, element) else { return false }
         if let window {
-            guard let currentWindow = Self.attribute(AXUIElementCreateApplication(application.processIdentifier), kAXFocusedWindowAttribute),
+            guard let currentWindow = Self.attribute(app, kAXFocusedWindowAttribute),
                   CFEqual(currentWindow, window) else { return false }
         }
         return Self.attribute(element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole
+    }
+
+    private static func applicationElement(_ application: NSRunningApplication) -> AXUIElement {
+        let element = AXUIElementCreateApplication(application.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.2)
+        return element
     }
 
     var isSearchField: Bool {
@@ -131,6 +139,7 @@ struct DictationTarget {
 }
 
 /// Inserts text at the current cursor position using system paste
+@MainActor
 class TextInserter {
 
     /// A data-backed copy of every readable pasteboard item and type. Keeping
@@ -173,7 +182,16 @@ class TextInserter {
 
     /// Insert text at current cursor position
     /// Uses clipboard + paste for reliable cross-app insertion
-    func insert(text: String, target: DictationTarget) async throws {
+    func insert(text: String, target: DictationTarget, learnEdits: Bool = false) async throws {
+        try target.validate()
+        EditLearningTracker.shared.settle()
+        let learningField: EditLearningField?
+        if learnEdits && Settings.shared.automaticEditLearningEnabled {
+            learningField = await Task.detached(priority: .utility) {
+                EditLearningField.capture(target: target, inserted: text)
+            }.value
+        } else { learningField = nil }
+        try Task.checkCancellation()
         try target.validate()
         debugLog("TextInserter.insert called with \(text.count) characters")
 
@@ -228,6 +246,7 @@ class TextInserter {
         try Task.checkCancellation()
         try target.validate()
         try simulatePaste()
+        if let learningField { EditLearningTracker.shared.start(learningField) }
 
         // Wait for paste to complete
         // Once Cmd+V is posted, cancellation must not turn this into a
