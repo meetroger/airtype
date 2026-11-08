@@ -46,6 +46,12 @@
 		B10000000000000000000001 = {isa = PBXBuildFile; fileRef = B20000000000000000000001; };
         B10000000000000000000002 = {isa = PBXBuildFile; fileRef = B20000000000000000000002; };
         B10000000000000000000003 = {isa = PBXBuildFile; fileRef = B20000000000000000000003; };
+        BC1000000000000000000001 = {isa = PBXBuildFile; fileRef = BC2000000000000000000001; };
+        BC1000000000000000000002 = {isa = PBXBuildFile; fileRef = BC2000000000000000000002; };
+        BC1000000000000000000003 = {isa = PBXBuildFile; fileRef = BC2000000000000000000003; };
+        BC1000000000000000000010 = {isa = PBXBuildFile; productRef = BC9000000000000000000010; };
+        BC1000000000000000000012 = {isa = PBXBuildFile; fileRef = BC2000000000000000000012; };
+        BC1000000000000000000013 = {isa = PBXBuildFile; fileRef = BC2000000000000000000013; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -88,6 +94,11 @@
 		B20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationPersonalization.swift; sourceTree = "<group>"; };
         B20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditLearning.swift; sourceTree = "<group>"; };
         B20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditLearningTracker.swift; sourceTree = "<group>"; };
+        BC2000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEMicProtocol.swift; sourceTree = "<group>"; };
+        BC2000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEMicReceiver.swift; sourceTree = "<group>"; };
+        BC2000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEOpusDecoder.swift; sourceTree = "<group>"; };
+        BC2000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = text; path = "Opus-LICENSE.txt"; sourceTree = "<group>"; };
+        BC2000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEMicSources.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -96,6 +107,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				42A2B0E72F3AC06100283808 /* HotKey in Frameworks */,
+                BC1000000000000000000010,
 				42A2B0E82F3AC06100283808 /* MLXAudioCore in Frameworks */,
 				42A2B0E92F3AC06100283808 /* MLXAudioSTT in Frameworks */,
 			);
@@ -107,7 +119,8 @@
 		A50000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-				A30000000000000000000002 /* Info.plist */,
+                BC2000000000000000000012,
+                A30000000000000000000002 /* Info.plist */,
 				A30000000000000000000003 /* Airtype.entitlements */,
 				A50000000000000000000002 /* Sources */,
 				A50000000000000000000006 /* Products */,
@@ -153,6 +166,10 @@
 		A50000000000000000000005 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+                BC2000000000000000000013,
+                BC2000000000000000000001,
+                BC2000000000000000000002,
+                BC2000000000000000000003,
 				A2000A00000000000000000A /* AudioRecorder.swift */,
 				A20015000000000000000015 /* UpdateChecker.swift */,
 				A2000B00000000000000000B /* ElevenLabsService.swift */,
@@ -215,6 +232,7 @@
 			name = Airtype;
 			packageProductDependencies = (
 				A90000000000000000000001 /* HotKey */,
+                BC9000000000000000000010,
 				A90000000000000000000002 /* MLXAudioCore */,
 				A90000000000000000000003 /* MLXAudioSTT */,
 			);
@@ -248,6 +266,7 @@
 			mainGroup = A50000000000000000000001;
 			packageReferences = (
 				AA0000000000000000000001 /* XCRemoteSwiftPackageReference "HotKey" */,
+                BC9000000000000000000011,
 				AA0000000000000000000002 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */,
 			);
 			productRefGroup = A50000000000000000000006 /* Products */;
@@ -265,6 +284,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10013000000000000000013 /* Assets.xcassets in Resources */,
+                BC1000000000000000000012,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,6 +306,10 @@
 				A10009000000000000000009 /* WaveformView.swift in Sources */,
 				A10014000000000000000014 /* SetupWizardView.swift in Sources */,
 				A1001A00000000000000001A /* TranscriptionHistoryView.swift in Sources */,
+                BC1000000000000000000013,
+                BC1000000000000000000001,
+                BC1000000000000000000002,
+                BC1000000000000000000003,
 				A1000A00000000000000000A /* AudioRecorder.swift in Sources */,
 				A10015000000000000000015 /* UpdateChecker.swift in Sources */,
 				A1000B00000000000000000B /* ElevenLabsService.swift in Sources */,
@@ -471,6 +495,7 @@
 				revision = be7b8f60e9ea77b7fa80db81c3ae864dc4e8938c;
 			};
 		};
+        BC9000000000000000000011 = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/alta/swift-opus.git"; requirement = {kind = exactVersion; version = 0.0.2; }; };
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -489,6 +514,7 @@
 			package = AA0000000000000000000002 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */;
 			productName = MLXAudioSTT;
 		};
+        BC9000000000000000000010 = {isa = XCSwiftPackageProductDependency; package = BC9000000000000000000011; productName = Copus; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A50000000000000000000000 /* Project object */;

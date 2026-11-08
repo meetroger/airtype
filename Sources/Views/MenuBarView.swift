@@ -238,6 +238,7 @@ struct MenuBarView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             audioInputDeviceManager.refreshDevices()
+            appState.refreshBLEMicrophones()
         }
     }
 
@@ -316,6 +317,7 @@ struct MenuBarView: View {
                 .frame(maxWidth: 140, alignment: .trailing)
 
             Menu {
+                Text("Microphones")
                 Button {
                     audioInputDeviceManager.selectDevice(uid: nil)
                 } label: {
@@ -325,11 +327,6 @@ struct MenuBarView: View {
                         Text(audioInputDeviceManager.systemDefaultLabel)
                     }
                 }
-
-                if !audioInputDeviceManager.devices.isEmpty {
-                    Divider()
-                }
-
                 ForEach(audioInputDeviceManager.devices) { device in
                     Button {
                         audioInputDeviceManager.selectDevice(uid: device.uid)
@@ -341,6 +338,29 @@ struct MenuBarView: View {
                         }
                     }
                 }
+
+                Divider()
+                Text("BLE Microphones")
+                Button("Search again") { appState.refreshBLEMicrophones() }
+                if audioInputDeviceManager.usesBLE {
+                    Text(appState.bleMicrophoneStatus)
+                }
+                if appState.bleMicrophoneSources.isEmpty {
+                    Text("Searching for BLE microphones…")
+                }
+                ForEach(appState.bleMicrophoneSources) { source in
+                    Button {
+                        appState.selectBLEMicrophone(source.id)
+                    } label: {
+                        let suffix = source.id == appState.connectedBLEMicrophoneID
+                            ? " (Connected)" : source.isAvailable ? "" : " (Offline)"
+                        if audioInputDeviceManager.usesBLE && source.id == appState.selectedBLEMicrophoneID {
+                            Label(source.label + " (BLE)" + suffix, systemImage: "checkmark")
+                        } else {
+                            Text(source.label + " (BLE)" + suffix)
+                        }
+                    }
+                }
             } label: {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .semibold))
@@ -349,14 +369,18 @@ struct MenuBarView: View {
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
-            .disabled(appState.isRecording)
+            .disabled(!appState.canChangeAudioSource)
             .accessibilityLabel("Choose microphone")
             .help(appState.isRecording ? "Stop recording before changing microphones" : "Choose microphone")
         }
     }
 
     private var currentMicrophoneLabel: String {
-        audioInputDeviceManager.selectedDeviceUID.isEmpty
+        if audioInputDeviceManager.usesBLE {
+            return appState.bleMicrophoneSources.first(where: { $0.id == appState.selectedBLEMicrophoneID })
+                .map { $0.label + " (BLE)" } ?? "BLE Microphone"
+        }
+        return audioInputDeviceManager.selectedDeviceUID.isEmpty
             ? audioInputDeviceManager.systemDefaultLabel
             : audioInputDeviceManager.selectedDeviceName
     }

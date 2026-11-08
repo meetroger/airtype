@@ -12,11 +12,14 @@ class StreamingAudioCapture {
     private var recordedByteCount: UInt64 = 0
     private var tapInstalled = false
 
+    private var bleReceiver: BLEMicReceiver?
+
     private let targetSampleRate: Double = 16000
 
     @discardableResult
     func start(
         deviceID: AudioDeviceID? = nil,
+        useBLE: Bool = false,
         onLevel: ((Float, Float) -> Void)? = nil,
         onChunk: @escaping (Data) -> Void
     ) throws -> URL {
@@ -24,6 +27,24 @@ class StreamingAudioCapture {
         self.onLevel = onLevel
 
         do {
+            if useBLE {
+                let receiver = BLEMicReceiver.shared
+                guard receiver.isSubscribed else {
+                    throw RecordingError.setupFailed("BLE microphone is not connected. Select Passport Mic (BLE) and wait for connection.")
+                }
+                let url = try AudioRecorder.makeRecordingURL(fileExtension: "wav")
+                guard FileManager.default.createFile(atPath: url.path, contents: Self.wavHeader(dataByteCount: 0)) else {
+                    throw StreamingAudioCaptureError.recordingFileCreationFailed
+                }
+                recordingURL = url
+                recordingFileHandle = try FileHandle(forWritingTo: url)
+                try recordingFileHandle?.seekToEnd()
+                recordedByteCount = 0
+                bleReceiver = receiver
+                receiver.onPCM = { [weak self] in self?.receiveBLEPCM($0) }
+                receiveBLEPCM(receiver.recentPCM)
+                return url
+            }
             let engine = AVAudioEngine()
             self.engine = engine
 
@@ -133,6 +154,28 @@ class StreamingAudioCapture {
         }
     }
 
+    private func receiveBLEPCM(_ data: Data) {
+        guard !data.isEmpty else { return }
+        var sum: Float = 0
+        var peak: Float = 0
+        data.withUnsafeBytes { bytes in
+            for i in stride(from: 0, to: bytes.count - 1, by: 2) {
+                let value = Float(Int16(bitPattern: UInt16(bytes[i]) | UInt16(bytes[i + 1]) << 8)) / 32768
+                sum += value * value
+                peak = max(peak, abs(value))
+            }
+        }
+        onLevel?(Self.normalizedLevel(sqrt(sum / Float(data.count / 2))), Self.normalizedLevel(peak))
+        onChunk?(data)
+        recordingQueue.async { [weak self] in
+            guard let self, let handle = self.recordingFileHandle else { return }
+            do {
+                try handle.write(contentsOf: data)
+                self.recordedByteCount += UInt64(data.count)
+            } catch { debugLog("Failed to archive BLE audio: \(error)") }
+        }
+    }
+
     /// A bounded, independent WAV snapshot. Never decode the file being written.
     func previewSnapshot() async -> URL? {
         await withCheckedContinuation { continuation in
@@ -160,6 +203,8 @@ class StreamingAudioCapture {
 
     @discardableResult
     func stop(discard: Bool = false) -> URL? {
+        bleReceiver?.onPCM = nil
+        bleReceiver = nil
         if tapInstalled {
             engine?.inputNode.removeTap(onBus: 0)
             tapInstalled = false

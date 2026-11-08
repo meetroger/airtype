@@ -26,7 +26,11 @@ final class AudioInputDeviceManager: ObservableObject {
         installDeviceListeners()
     }
 
+    static let bleDeviceUID = "airtype:ble:passport"
+    var usesBLE: Bool { selectedDeviceUID == Self.bleDeviceUID }
+
     var selectedDeviceName: String {
+        if usesBLE { return "BLE Microphone" }
         if let selected = devices.first(where: { $0.uid == selectedDeviceUID }) {
             return selected.name
         }
@@ -53,7 +57,7 @@ final class AudioInputDeviceManager: ObservableObject {
 
     func deviceIDForRecording() -> AudioDeviceID? {
         refreshDevices()
-        guard !selectedDeviceUID.isEmpty else { return nil }
+        guard !usesBLE, !selectedDeviceUID.isEmpty else { return nil }
         guard let selectedDevice = devices.first(where: { $0.uid == selectedDeviceUID }) else {
             fallbackToSystemDefault()
             return nil
@@ -72,7 +76,7 @@ final class AudioInputDeviceManager: ObservableObject {
         devices = refreshedDevices
         defaultDeviceUID = Self.loadDefaultInputDeviceUID()
 
-        if !selectedDeviceUID.isEmpty,
+        if !usesBLE, !selectedDeviceUID.isEmpty,
            !refreshedDevices.contains(where: { $0.uid == selectedDeviceUID }) {
             fallbackToSystemDefault()
         }

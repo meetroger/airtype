@@ -30,6 +30,53 @@ Get the latest release from [GitHub Releases](https://github.com/sugarforever/ai
 
 Airtype runs in the menu bar. Keyboard shortcuts can be changed in Settings.
 
+## Direct BLE microphone
+
+Airtype can receive audio directly from the ESP32-S3 AI Passport microphone
+(service `666f6c6f-7061-7373-706f-727400000001`, protocol v1).
+No BlackHole driver or separate PassportMic receiver app is needed.
+
+1. Quit the standalone PassportMic receiver so Airtype owns the audio subscription.
+2. Pair the device as a Bluetooth keyboard in macOS, as required by its firmware.
+3. Open Airtype's menu bar **Microphone** menu and allow Bluetooth access.
+   Traditional microphones appear first, followed by a separator and all discovered
+   **BLE Microphones** in the same menu. Select a device directly; the current
+   input has a checkmark. The name and short device ID distinguish same-name
+   microphones. **Search again** refreshes discovery, including devices already
+   connected to macOS as keyboards. Discovery remains available while a traditional
+   microphone is selected, without subscribing to BLE audio.
+   Your BLE choice is remembered across restarts and stays selected while offline;
+   Airtype waits for that device instead of switching to a different microphone.
+   Stop recording before switching. Airtype unsubscribes the old microphone
+   before connecting the new one and discards all old-session audio.
+4. Use the device's MIC/UP button as before. Its HID shortcut must match
+   Airtype's configured shortcut. Mac keyboard shortcuts also work, but the
+   device must be recording to transmit audio; Airtype cannot remotely start it.
+
+The receiver reassembles BLE fragments, validates sessions and sequence numbers,
+and decodes mono 20 ms Opus frames directly to 16 kHz PCM16 using the bundled,
+source-built libopus dependency. Short packet losses use Opus concealment;
+large gaps reset the decoder. Startup transient suppression is currently disabled
+to allow testing microphone firmware changes: decoded PCM reaches buffering,
+transcription, and archival without startup muting or fade-in.
+A bounded one-second buffer preserves audio while
+Airtype prepares capture. Disconnects and stalls stop the current recording and
+trigger reconnection. BLE unavailability produces an error instead of recording
+from another microphone.
+
+PCM goes directly to Doubao streaming. Completed recordings are encoded as M4A,
+including BLE recordings, for storage and the existing file-based ASR providers.
+WAV is used during capture and kept as a recovery copy only if encoding fails.
+Raw Opus packets are not passed to ASR. Normal system microphone capture remains
+available through the same menu; switching away stops BLE reception.
+
+Build in Xcode as usual: Swift Package Manager builds the pinned `Copus` product
+from `alta/swift-opus` 0.0.2, with no Homebrew runtime dependency. For standalone
+protocol and real codec checks, install development libopus (`brew install opus`)
+and run `scripts/check-ble-mic.sh` (`OPUS_ROOT` can override its install prefix).
+Hardware testing should cover tap/toggle, hold/release, cancellation, Bluetooth
+reconnect, and both local and streaming ASR with the actual device.
+
 ## Features
 
 - Fully local transcription with no API key required

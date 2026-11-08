@@ -107,8 +107,8 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     // MARK: - Recording
-    func startRecording(deviceID: AudioDeviceID? = nil) throws -> URL {
-        guard hasPermission else {
+    func startRecording(deviceID: AudioDeviceID? = nil, useBLE: Bool = false) throws -> URL {
+        guard useBLE || hasPermission else {
             throw RecordingError.noPermission
         }
 
@@ -116,6 +116,7 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             let url = try capture.start(
                 deviceID: deviceID,
+                useBLE: useBLE,
                 onLevel: { [weak self] average, peak in
                     Task { @MainActor [weak self] in
                         self?.updateCapturedLevels(average: average, peak: peak)
@@ -236,7 +237,10 @@ class AudioRecorder: NSObject, ObservableObject {
         audioCapture = nil
         endCaptureMonitoring()
         guard let wavURL else { return nil }
+        return try await finalizeRecording(wavURL: wavURL)
+    }
 
+    func finalizeRecording(wavURL: URL) async throws -> URL {
         do {
             return try await convertToM4A(wavURL: wavURL)
         } catch let error as RecordingError {

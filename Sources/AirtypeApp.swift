@@ -502,6 +502,7 @@ class AppState: ObservableObject {
     )?
     private var isStartingPushToTalk = false
     private var isPreparingRecording = false
+    var canChangeAudioSource: Bool { !isRecording && !isPreparingRecording }
     private var pushToTalkReleasePending = false
     private var isStopRequested = false
     private var sharedShortcutHoldTask: Task<Void, Never>?
@@ -520,12 +521,48 @@ class AppState: ObservableObject {
         }
     }
 
+    private var audioSourceObserver: AnyCancellable?
+    @Published var bleMicrophoneStatus = "BLE disconnected"
+    @Published private(set) var bleMicrophoneSources: [MicSource] = []
+    @Published private(set) var selectedBLEMicrophoneID: UUID?
+    @Published private(set) var connectedBLEMicrophoneID: UUID?
+
+    func selectBLEMicrophone(_ id: UUID) {
+        guard canChangeAudioSource,
+              bleMicrophoneSources.contains(where: { $0.id == id }) else { return }
+        // Pin the chosen identity before enabling reception, so the previous
+        // BLE selection cannot briefly reconnect when switching from CoreAudio.
+        BLEMicReceiver.shared.selectSource(id)
+        audioInputDeviceManager.selectDevice(uid: AudioInputDeviceManager.bleDeviceUID)
+    }
+
+    func refreshBLEMicrophones() {
+        BLEMicReceiver.shared.start(receiving: audioInputDeviceManager.usesBLE)
+        BLEMicReceiver.shared.refreshSources()
+    }
+
     private var providerObserver: AnyCancellable?
     private var floatingVisibilityObserver: AnyCancellable?
     private var focusActivationObserver: AnyCancellable?
 
     init() {
         setupHotkeyCallbacks()
+        BLEMicReceiver.shared.onStatus = { [weak self] message in self?.bleMicrophoneStatus = message }
+        BLEMicReceiver.shared.onSourcesChanged = { [weak self] in
+            guard let self else { return }
+            self.bleMicrophoneSources = BLEMicReceiver.shared.sources
+            self.selectedBLEMicrophoneID = BLEMicReceiver.shared.selectedSourceID
+            self.connectedBLEMicrophoneID = BLEMicReceiver.shared.connectedSourceID
+        }
+        BLEMicReceiver.shared.onFailure = { [weak self] message in
+            guard let self, self.isRecording else { return }
+            self.lastError = message
+            if self.isRecording, let mode = self.recordingMode { self.requestStop(for: mode) }
+        }
+        audioSourceObserver = audioInputDeviceManager.$selectedDeviceUID.sink { uid in
+            if uid == AudioInputDeviceManager.bleDeviceUID { BLEMicReceiver.shared.start() }
+            else { BLEMicReceiver.shared.setReceivingEnabled(false) }
+        }
         focusActivationObserver = NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
             .sink { notification in
@@ -828,7 +865,7 @@ class AppState: ObservableObject {
                     bundleID: target.application.bundleIdentifier ?? "", searchField: target.isSearchField,
                     overrides: settings.appSceneOverrides)
             }
-            guard await audioRecorder.requestPermission() else {
+            if !audioInputDeviceManager.usesBLE, !(await audioRecorder.requestPermission()) {
                 throw RecordingError.noPermission
             }
             guard session == deliverySession else { return }
@@ -839,7 +876,7 @@ class AppState: ObservableObject {
             } else {
                 let url: URL
                 do {
-                    url = try audioRecorder.startRecording(deviceID: selectedDeviceID)
+                    url = try audioRecorder.startRecording(deviceID: selectedDeviceID, useBLE: audioInputDeviceManager.usesBLE)
                 } catch where selectedDeviceID != nil {
                     audioInputDeviceManager.fallbackToSystemDefault()
                     url = try audioRecorder.startRecording()
@@ -935,6 +972,7 @@ class AppState: ObservableObject {
             do {
                 recordingURL = try capture.start(
                     deviceID: deviceID,
+                    useBLE: audioInputDeviceManager.usesBLE,
                     onLevel: levelHandler,
                     onChunk: chunkHandler
                 )
@@ -1041,9 +1079,13 @@ class AppState: ObservableObject {
 
     private func stopStreamingAndProcess() async {
         let mode = recordingMode ?? .transcribe
-        streamingCapture?.stop()
+        let wavURL = streamingCapture?.stop()
         streamingCapture = nil
         audioRecorder.endCaptureMonitoring()
+        let archiveTask = Task { () throws -> URL? in
+            guard let wavURL else { return nil }
+            return try await audioRecorder.finalizeRecording(wavURL: wavURL)
+        }
 
         let recordedDuration = audioRecorder.recordingDuration
         if recordedDuration < minimumRecordingDuration {
@@ -1057,7 +1099,12 @@ class AppState: ObservableObject {
             processingStage = ""
             processingProgress = 0.0
             partialTranscription = ""
-            lastError = nil
+            do {
+                _ = try await archiveTask.value
+                lastError = nil
+            } catch {
+                lastError = error.localizedDescription
+            }
             lastNotice = shortRecordingNotice(duration: recordedDuration)
             preconnectStreamingIfNeeded()
             return
@@ -1071,6 +1118,7 @@ class AppState: ObservableObject {
         do {
             try await streamingService?.endAudio()
             debugLog("Sent end-of-audio signal")
+            _ = try await archiveTask.value
 
             // Wait briefly for final result
             try await Task.sleep(nanoseconds: 1_000_000_000)

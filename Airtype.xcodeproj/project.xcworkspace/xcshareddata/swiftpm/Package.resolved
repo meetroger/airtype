@@ -1,5 +1,5 @@
 {
-  "originHash" : "78b046c8c2d76d61289a91a9a03dcaeb8b993ace3d3f4d52c8936b4ee501ad54",
+  "originHash" : "deffe256b84c365f88557e0d75a3c242ee02bfc6183dba061d4eb1b7a66d2dbe",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -24,7 +24,6 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Blaizzy/mlx-audio-swift.git",
       "state" : {
-        "branch" : "main",
         "revision" : "be7b8f60e9ea77b7fa80db81c3ae864dc4e8938c"
       }
     },
@@ -116,6 +115,15 @@
       "state" : {
         "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
         "version" : "1.1.1"
+      }
+    },
+    {
+      "identity" : "swift-opus",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/alta/swift-opus.git",
+      "state" : {
+        "revision" : "5f0164b8915fb9001265c54413aa0f0efbd3df06",
+        "version" : "0.0.2"
       }
     },
     {
