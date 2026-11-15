@@ -265,12 +265,15 @@ struct SetupWizardView: View {
                     SettingsCardDivider()
 
                     SettingsCardRow(label: "Model") {
-                        TextField(settings.enhancementProvider.defaultModel, text: Binding(
-                            get: { settings.currentEnhancementModel },
-                            set: { settings.currentEnhancementModel = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11, design: .monospaced))
+                        HStack(alignment: .top, spacing: 6) {
+                            TextField(settings.enhancementProvider.defaultModel, text: Binding(
+                                get: { settings.currentEnhancementModel },
+                                set: { settings.currentEnhancementModel = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                            ModelCheckView(settings: settings)
+                        }
                     }
                 }
             }

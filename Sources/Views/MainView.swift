@@ -826,6 +826,8 @@ struct MainView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11, design: .monospaced))
 
+                                ModelCheckView(settings: settings)
+
                                 if settings.enhancementProvider == .custom {
                                     Menu {
                                         ForEach(availableCustomModels, id: \.self) { model in

@@ -88,6 +88,17 @@ class EnhancementService {
         }
     }
 
+    /// Uses the production request path with synthetic text and no personal context.
+    func checkModel() async throws {
+        _ = try await process(
+            text: "Connection check.",
+            prompt: "Return the transcript unchanged.",
+            operation: "Model check",
+            skipVeryShortText: false,
+            isModelCheck: true
+        )
+    }
+
     private func process(
         text: String,
         prompt: String,
@@ -95,7 +106,8 @@ class EnhancementService {
         context: String = "",
         skipVeryShortText: Bool,
         maxCompletionTokens: Int = 2048,
-        acceptsEmptyOutput: Bool = false
+        acceptsEmptyOutput: Bool = false,
+        isModelCheck: Bool = false
     ) async throws -> String {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedText.isEmpty || (skipVeryShortText && trimmedText.count < 3) {
@@ -126,19 +138,22 @@ class EnhancementService {
         // GPT-5 models use "developer" role instead of "system"
         let systemRole = enhancementModel.hasPrefix("gpt-5") ? "developer" : "system"
 
-        // GPT-5-mini and nano don't support custom temperature
-        let supportsTemperature = !enhancementModel.contains("mini") && !enhancementModel.contains("nano")
+        // GPT-6's default reasoning mode rejects custom temperature. Omit it so
+        // the API uses its default, including provider-qualified model IDs.
+        let modelName = enhancementModel.split(separator: "/").last.map(String.init)?.lowercased() ?? ""
+        let supportsTemperature = !modelName.hasPrefix("gpt-6")
+            && !enhancementModel.contains("mini") && !enhancementModel.contains("nano")
 
-        let allowedContext = settings.cursorContextEnabled && (supportsLocalPrewarming || settings.allowCloudContext)
+        let allowedContext = !isModelCheck && settings.cursorContextEnabled && (supportsLocalPrewarming || settings.allowCloudContext)
             ? DictationContext.sanitize(context) : ""
         let transcriptData = try JSONEncoder().encode(TranscriptInput(transcript: text,
             referenceContext: allowedContext.isEmpty ? nil : allowedContext))
         let transcriptJSON = String(decoding: transcriptData, as: UTF8.self)
-        let learnedTerms = await MainActor.run { EditLearningStore.shared.entries.map { $0.pair.to } }
+        let learnedTerms = isModelCheck ? [] : await MainActor.run { EditLearningStore.shared.entries.map { $0.pair.to } }
         let systemPrompt = """
         \(transcriptIsolationRules)
 
-        \(preferredVocabularyRules(for: text, learnedTerms: learnedTerms))
+        \(isModelCheck ? "" : preferredVocabularyRules(for: text, learnedTerms: learnedTerms))
 
         \(DictationSpelling.rules)
 
@@ -185,14 +200,15 @@ class EnhancementService {
         }
 
         if httpResponse.statusCode != 200 {
+            if isModelCheck { throw EnhancementError.httpError(httpResponse.statusCode) }
             // Log raw error response
-            if let rawError = String(data: data, encoding: .utf8) {
+            if !isModelCheck, let rawError = String(data: data, encoding: .utf8) {
                 debugLog("\(operation): Error response (\(httpResponse.statusCode)): \(rawError)")
             }
 
             if let errorResponse = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data) {
                 let message = errorResponse.error.message
-                debugLog("\(operation): API error message: \(message)")
+                if !isModelCheck { debugLog("\(operation): API error message: \(message)") }
 
                 // Detect specific error types
                 if message.lowercased().contains("rate limit") {
@@ -216,7 +232,7 @@ class EnhancementService {
         }
 
         let completion = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-        logMLXMetrics(completion.mlxDSparkMetrics, operation: operation)
+        if !isModelCheck { logMLXMetrics(completion.mlxDSparkMetrics, operation: operation) }
         guard let enhancedText = completion.choices.first?.message.content else {
             if acceptsEmptyOutput { return "" }
             throw EnhancementError.noContent
@@ -226,6 +242,7 @@ class EnhancementService {
 
         // If enhancement returned empty, use original
         if result.isEmpty {
+            if isModelCheck { throw EnhancementError.noContent }
             if acceptsEmptyOutput { return "" }
             return trimmedText
         }
@@ -290,7 +307,8 @@ class EnhancementService {
 
     private var enhancementPrompt: String {
         let prompt = settings.enhancementPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        return prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
+        let correctionPrompt = prompt.isEmpty ? Settings.defaultEnhancementPrompt : prompt
+        return correctionPrompt + "\n\n" + DictationFormatting.rules
     }
 
     private func preferredVocabularyRules(for text: String, learnedTerms: [String]) -> String {
@@ -375,7 +393,7 @@ class EnhancementService {
         - Resolve obvious speech-recognition mistakes from context, but do not invent missing information.
         - Do not summarize, explain, answer, or add information.
         - The final output MUST be entirely in \(target) except for proper nouns, code, identifiers, or terms that should remain unchanged.
-        - Return ONLY the final cleaned and translated text, with no labels, quotation marks, or Markdown.
+        - Return ONLY the final cleaned and translated text, with no labels, quotation marks, or decorative Markdown. Preserve the readable plain-text paragraphs and numbered list lines described above.
         """
     }
 }
